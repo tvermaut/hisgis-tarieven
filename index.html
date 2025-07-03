@@ -91,8 +91,19 @@
             vertical-align: middle;
             margin-right: 0.3em;
         }
+        #table-area {
+            flex: 1 1 auto;
+            min-height: 0;
+            min-width: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
         .airtable-table-wrapper {
+            height: 100%;
+            width: 100%;
             overflow-x: auto;
+            overflow-y: auto;
         }
         table.airtable-table {
             width: 100%;
@@ -127,6 +138,9 @@
         table.airtable-table td, table.airtable-table th {
             padding-top: 2px !important;
             padding-bottom: 2px !important;
+        }
+        td.right, th.right {
+            text-align: right;
         }
         #statusbar {
             width: 100vw;
@@ -167,6 +181,17 @@
             border-bottom: 1px solid #e0e0e0;
             border-radius: 7px 7px 0 0;
             margin-bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+        }
+        .group-header .toggle {
+            margin-left: 1em;
+            font-size: 1.2em;
+            color: #888;
+            cursor: pointer;
+            user-select: none;
         }
         .group-content {
             padding: 10px 18px 10px 18px;
@@ -208,8 +233,8 @@
             </label>
         </span>
     </div>
-    <div id="table-area">
-        <div class="airtable-table-wrapper">
+    <div id="table-area" style="flex: 1 1 auto; min-height:0; min-width:0; overflow:auto;">
+        <div class="airtable-table-wrapper" style="height: calc(100vh - 170px);">
             <table class="airtable-table" id="airtable-table-head">
                 <thead>
                     <tr>
@@ -218,7 +243,7 @@
                         <th>Categorie</th>
                         <th>Tariefsoortnaam</th>
                         <th>Grondgebruik</th>
-                        <th>Aantal percelen</th>
+                        <th class="right">Aantal percelen</th>
                     </tr>
                 </thead>
             </table>
@@ -535,7 +560,7 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
             if (curGroup && curGroup.value === val) {
                 curGroup.rows.push(row);
             } else {
-                curGroup = {value: val, rows: [row]};
+                curGroup = {value: val, rows: [row], collapsed: false, id: Math.random().toString(36).substr(2,8)};
                 groups.push(curGroup);
             }
         });
@@ -544,17 +569,23 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
         }
         return groups;
     }
+    // Kolommen die niet getoond moeten worden
+    let hiddenCols = new Set(groupbyFields);
     function renderTableRows(rows) {
         let html = "";
         for (const row of rows) {
             html += "<tr>";
             for (let i=0; i<6; ++i) {
+                let field = FIELD_OPTIONS[i].value;
+                if (hiddenCols.has(field)) continue;
                 let val = row[i];
+                let cls = "";
                 if (i === 2 && (!val || val === "")) {
-                    html += `<td class="cat-empty">∅</td>`;
-                } else {
-                    html += `<td>${val !== undefined && val !== null ? val : ""}</td>`;
+                    cls = "cat-empty";
+                    val = "∅";
                 }
+                if (i === 5) cls += " right";
+                html += `<td class="${cls}">${val !== undefined && val !== null ? val : ""}</td>`;
             }
             html += "</tr>";
         }
@@ -564,9 +595,14 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
         let html = "";
         let field = groupFields[0];
         for (const group of groups) {
-            html += `<div class="group-box" style="margin-left:${depth*24}px">`;
-            html += `<div class="group-header">${FIELD_OPTIONS.find(f=>f.value===field).label}: ${group.value || "(leeg)"}</div>`;
-            html += `<div class="group-content">`;
+            let groupId = group.id;
+            let collapsed = group.collapsed;
+            html += `<div class="group-box" data-groupid="${groupId}" style="margin-left:${depth*24}px">`;
+            html += `<div class="group-header" data-groupid="${groupId}">
+                <span>${FIELD_OPTIONS.find(f=>f.value===field).label}: ${group.value || "(leeg)"}</span>
+                <span class="toggle" data-groupid="${groupId}" title="Groep ${collapsed?'openen':'sluiten'}">${collapsed?'&#9654;':'&#9660;'}</span>
+            </div>`;
+            html += `<div class="group-content" style="display:${collapsed?'none':'block'}">`;
             if (Array.isArray(group.rows) && groupFields.length>1 && group.rows.length && typeof group.rows[0] === "object" && group.rows[0].rows) {
                 html += renderGroups(group.rows, groupFields.slice(1), depth+1);
             } else {
@@ -587,6 +623,22 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
     }
     $('#airtable-table-root').html(html);
     setStatus(`Gereed! Percelen: ${perceelCount}, perceeltarieven: ${perceeltariefCount}`);
+
+    // Toggle-groepen
+    $('.group-header .toggle').off().on('click', function(e) {
+        let groupId = $(this).data('groupid');
+        let $box = $(`.group-box[data-groupid="${groupId}"]`);
+        let $content = $box.find('>.group-content');
+        let $icon = $box.find('.group-header .toggle');
+        if ($content.is(':visible')) {
+            $content.slideUp(120);
+            $icon.html('&#9654;').attr('title','Groep openen');
+        } else {
+            $content.slideDown(120);
+            $icon.html('&#9660;').attr('title','Groep sluiten');
+        }
+        e.stopPropagation();
+    });
 }
 function attachBarEvents(data, perceelCount, perceeltariefCount) {
     // Groepeer
