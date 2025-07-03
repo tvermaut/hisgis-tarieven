@@ -186,10 +186,6 @@ function combineCategorie(cat, subcat) {
 }
 
 function aggregateData(tariefsoorten, categorieen, gemeenten, provincies) {
-    // tariefsoort: id, version, aantal, naam, type, gemeente_id, opmerking, categorie_id
-    // categorieen: id, categorie, subcategorie
-    // gemeenten: id, uniekenaam, provincie_id
-    // provincies: id, naam
     const catMap = {};
     for (const cat of categorieen) {
         catMap[String(cat.id)] = cat;
@@ -239,14 +235,18 @@ function aggregateData(tariefsoorten, categorieen, gemeenten, provincies) {
     ]);
 }
 
-// Functie om provincie-cellen samen te voegen bij sortering op provincie
+// Correcte merge-functie: alleen de eerste cel tonen met rowspan, de rest leeg laten
 function mergeProvinceCells(table) {
-    // Alleen doen als gesorteerd op provincie (kolom 0)
     let order = table.order();
+    let api = table.api ? table.api() : table;
+    let rows = api.rows({ page: 'current', search: 'applied' }).nodes();
+    // Eerst: reset alle cellen
+    $(rows).each(function(i, row) {
+        let cell = $('td', row).eq(0);
+        cell.show().attr('rowspan', 1);
+    });
+    // Alleen samenvoegen als gesorteerd op provincie (kolom 0)
     if (order.length && order[0][0] === 0) {
-        // Haal alle zichtbare rijen op
-        let api = table.api ? table.api() : table;
-        let rows = api.rows({ page: 'current', search: 'applied' }).nodes();
         let lastProv = null;
         let rowspan = 1;
         let firstCell = null;
@@ -254,7 +254,7 @@ function mergeProvinceCells(table) {
             let cell = $('td', row).eq(0);
             let prov = cell.text();
             if (prov === lastProv) {
-                $(cell).remove();
+                cell.hide();
                 rowspan++;
                 if (firstCell) {
                     firstCell.attr('rowspan', rowspan);
@@ -265,12 +265,6 @@ function mergeProvinceCells(table) {
                 firstCell = cell;
                 firstCell.attr('rowspan', 1);
             }
-        });
-    } else {
-        // Zorg dat alle provincie-cellen zichtbaar zijn (geen rowspan)
-        $('#tariefTable tbody tr').each(function() {
-            let cell = $(this).find('td').eq(0);
-            if (cell.length) cell.attr('rowspan', 1);
         });
     }
 }
@@ -284,16 +278,14 @@ $(async function() {
     ]);
     const data = aggregateData(tariefsoorten, categorieen, gemeenten, provincies);
 
-    // Voeg de checkbox toe naast het zoekveld
     $.fn.dataTable.ext.search.push(function(settings, searchData, index, rowData, counter) {
         if (window.filterNoCatActive) {
-            // Laat alleen rijen zien zonder categorie (categorie === "")
+            // Alleen rijen zonder categorie (categorie === "")
             return rowData[2] === "";
         }
         return true;
     });
 
-    // Init DataTable
     let table = $('#tariefTable').DataTable({
         data: data,
         columns: [
@@ -343,6 +335,9 @@ $(async function() {
     table.on('order.dt search.dt page.dt', function() {
         mergeProvinceCells(table);
     });
+
+    // Initieel ook uitvoeren
+    mergeProvinceCells(table);
 });
 </script>
 </body>
