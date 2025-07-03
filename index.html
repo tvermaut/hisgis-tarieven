@@ -29,12 +29,15 @@
             min-height: 0;
             min-width: 0;
             overflow: hidden;
-        }
-        #tariefTable_wrapper {
-            height: 100%;
-            width: 100%;
             display: flex;
             flex-direction: column;
+        }
+        #tariefTable_wrapper {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            width: 100%;
         }
         .dataTables_scroll {
             flex: 1 1 auto;
@@ -45,7 +48,6 @@
             max-height: 100% !important;
         }
         .dataTables_paginate, .dataTables_info {
-            /* Zorg dat paginering en info altijd zichtbaar zijn */
             background: #fff;
         }
         .dataTables_filter {
@@ -67,10 +69,19 @@
             width: 100% !important;
             margin: 0 !important;
         }
-        /* Verberg standaard DataTables marges */
         .dataTables_wrapper {
             padding: 0 !important;
             margin: 0 !important;
+        }
+        /* Reserveer ruimte voor paginering */
+        .dataTables_wrapper .bottom {
+            min-height: 48px;
+            position: relative;
+            z-index: 2;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
     </style>
 </head>
@@ -83,6 +94,7 @@
                     <th>Categorie-id</th>
                     <th>Categorie</th>
                     <th>Tariefsoortnaam</th>
+                    <th>Gemeente</th>
                     <th>Aantal tariefsoorten</th>
                 </tr>
             </thead>
@@ -127,6 +139,28 @@ async function fetchTariefsoortcategorieen() {
     }));
 }
 
+async function fetchAllGemeenten() {
+    let allRows = [];
+    let offset = 0;
+    const limit = 1000;
+    while (true) {
+        const url = `https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=gemeente&offset=${offset}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        const rows = (data.gemeente || [])
+            .filter(item => item.row)
+            .map(item => item.row);
+        allRows = allRows.concat(rows);
+        if (rows.length < limit) break;
+        offset += limit;
+    }
+    // id, version, code, kadastralecode, naam, oatmodel, uniekenaam, provincie_id, status, opmerking
+    return allRows.map(r => ({
+        id: r[0],
+        uniekenaam: r[6]
+    }));
+}
+
 function combineCategorie(cat, subcat) {
     if (cat && subcat) return cat + ": " + subcat;
     if (cat) return cat;
@@ -134,12 +168,17 @@ function combineCategorie(cat, subcat) {
     return "";
 }
 
-function aggregateByCategorieAndNaam(tariefsoorten, categorieen) {
+function aggregateByCategorieAndNaam(tariefsoorten, categorieen, gemeenten) {
     // tariefsoort: id, version, aantal, naam, type, gemeente_id, opmerking, categorie_id
     // categorieen: id, categorie, subcategorie
+    // gemeenten: id, uniekenaam
     const catMap = {};
     for (const cat of categorieen) {
         catMap[String(cat.id)] = cat;
+    }
+    const gemeenteMap = {};
+    for (const gem of gemeenten) {
+        gemeenteMap[String(gem.id)] = gem.uniekenaam;
     }
     const aggregation = {};
     for (const row of tariefsoorten) {
@@ -148,15 +187,18 @@ function aggregateByCategorieAndNaam(tariefsoorten, categorieen) {
         if (opmerking && typeof opmerking === "string" && opmerking.trim().toLowerCase().startsWith('polder')) continue;
         const categorie_id = row[7] !== undefined && row[7] !== null && row[7] !== "" ? String(row[7]) : null;
         const naam = row[3];
+        const gemeente_id = row[5] !== undefined && row[5] !== null && row[5] !== "" ? String(row[5]) : null;
         let cat = categorie_id && catMap[categorie_id] ? catMap[categorie_id] : null;
         let catLabel = cat ? combineCategorie(cat.categorie, cat.subcategorie) : "";
         let catIdDisplay = categorie_id ? categorie_id : "∅";
-        let key = [catIdDisplay, catLabel, naam].join('||');
+        let gemeenteNaam = gemeente_id && gemeenteMap[gemeente_id] ? gemeenteMap[gemeente_id] : "";
+        let key = [catIdDisplay, catLabel, naam, gemeenteNaam].join('||');
         if (!aggregation[key]) {
             aggregation[key] = {
                 categorie_id: catIdDisplay,
                 categorie: catLabel,
                 naam: naam,
+                gemeente: gemeenteNaam,
                 count: 0,
                 hasNoCat: !categorie_id
             };
@@ -167,17 +209,19 @@ function aggregateByCategorieAndNaam(tariefsoorten, categorieen) {
         obj.categorie_id,
         obj.categorie,
         obj.naam,
+        obj.gemeente,
         obj.count,
         obj.hasNoCat // voor filter
     ]);
 }
 
 $(async function() {
-    const [tariefsoorten, categorieen] = await Promise.all([
+    const [tariefsoorten, categorieen, gemeenten] = await Promise.all([
         fetchAllTariefsoorten(),
-        fetchTariefsoortcategorieen()
+        fetchTariefsoortcategorieen(),
+        fetchAllGemeenten()
     ]);
-    const data = aggregateByCategorieAndNaam(tariefsoorten, categorieen);
+    const data = aggregateByCategorieAndNaam(tariefsoorten, categorieen, gemeenten);
 
     // Voeg de checkbox toe naast het zoekveld
     $.fn.dataTable.ext.search.push(function(settings, searchData, index, rowData, counter) {
@@ -195,6 +239,7 @@ $(async function() {
             { title: "Categorie-id" },
             { title: "Categorie" },
             { title: "Tariefsoortnaam" },
+            { title: "Gemeente" },
             { title: "Aantal tariefsoorten", className: "dt-right" }
         ],
         pageLength: 100,
@@ -203,7 +248,7 @@ $(async function() {
             url: "//cdn.datatables.net/plug-ins/1.13.7/i18n/nl-NL.json"
         },
         autoWidth: false,
-        scrollY: 'calc(100vh - 110px)',
+        scrollY: 'calc(100vh - 140px)',
         scrollCollapse: true,
         paging: true,
         dom: '<"top"f>rt<"bottom"ip><"clear">'
