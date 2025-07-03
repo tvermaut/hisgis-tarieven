@@ -24,6 +24,18 @@
             margin: 0;
             padding: 0;
         }
+        #airtablebar {
+            display: flex;
+            align-items: center;
+            background: #f4f6fa;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 6px 12px;
+            font-size: 13px;
+            gap: 1.5em;
+        }
+        #airtablebar label {
+            margin-right: 0.5em;
+        }
         #table-area {
             flex: 1 1 auto;
             min-height: 0;
@@ -114,10 +126,70 @@
             display: flex;
             align-items: center;
         }
+        .airtable-dropdown {
+            font-size: 13px;
+            padding: 2px 6px;
+            margin-right: 0.5em;
+        }
+        .airtablebar-section {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+        }
     </style>
 </head>
 <body>
 <div id="container">
+    <div id="airtablebar">
+        <div class="airtablebar-section">
+            <label for="groupby">Groepeer op</label>
+            <select id="groupby" class="airtable-dropdown">
+                <option value="">(geen)</option>
+                <option value="provincie">Provincie</option>
+                <option value="gemeente">Gemeente</option>
+                <option value="categorie">Categorie</option>
+                <option value="naam">Tariefsoortnaam</option>
+                <option value="grondgebruik">Grondgebruik</option>
+            </select>
+        </div>
+        <div class="airtablebar-section">
+            <label for="sortby">Sorteer op</label>
+            <select id="sortby" class="airtable-dropdown">
+                <option value="provincie">Provincie</option>
+                <option value="gemeente">Gemeente</option>
+                <option value="categorie">Categorie</option>
+                <option value="naam">Tariefsoortnaam</option>
+                <option value="grondgebruik">Grondgebruik</option>
+                <option value="percelen">Aantal percelen</option>
+            </select>
+            <select id="sortdir" class="airtable-dropdown">
+                <option value="asc">Oplopend</option>
+                <option value="desc">Aflopend</option>
+            </select>
+        </div>
+        <div class="airtablebar-section">
+            <label for="filterveld">Filter</label>
+            <select id="filterveld" class="airtable-dropdown">
+                <option value="">(geen)</option>
+                <option value="provincie">Provincie</option>
+                <option value="gemeente">Gemeente</option>
+                <option value="categorie">Categorie</option>
+                <option value="naam">Tariefsoortnaam</option>
+                <option value="grondgebruik">Grondgebruik</option>
+            </select>
+            <input type="text" id="filterwaarde" class="airtable-dropdown" placeholder="waarde..." style="width: 120px;">
+        </div>
+        <span class="filter-checkboxes">
+            <label>
+                <input type="checkbox" class="dt-checkbox" id="noCatFilter">
+                Alleen zonder categorie
+            </label>
+            <label>
+                <input type="checkbox" class="dt-checkbox" id="hasPerceeltariefFilter">
+                Alleen met perceeltarieven
+            </label>
+        </span>
+    </div>
     <div id="table-area">
         <table id="tariefTable" class="display" style="width:100%">
             <thead>
@@ -139,19 +211,47 @@
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
 <script>
+// Retry helper met exponential backoff (0s, 1s, 3s, 10s)
+async function fetchWithRetry(url, label, maxTries = 5) {
+    let tries = 0;
+    let delays = [0, 1000, 3000, 10000];
+    let lastErr = null;
+    while (tries < maxTries) {
+        try {
+            setStatus(`Laden ${label}... poging ${tries+1}`);
+            let resp = await fetch(url);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return await resp.json();
+        } catch (e) {
+            lastErr = e;
+            let delay = delays[Math.min(tries, delays.length-1)];
+            setStatus(`Fout bij laden ${label} (poging ${tries+1}): ${e}. Probeer opnieuw over ${delay/1000}s...`);
+            if (tries === maxTries-1) break;
+            if (delay > 0) await new Promise(r => setTimeout(r, delay));
+        }
+        tries++;
+    }
+    setStatus(`Definitief gestopt met laden van ${label}: ${lastErr}`);
+    throw lastErr;
+}
+
 function setStatus(msg) {
     document.getElementById('statusbar').textContent = msg;
 }
 
-// REST helpers met status
+// REST helpers met status en retry
 async function fetchPaged(url, key, statusLabel, countCb) {
     let allRows = [];
     let offset = 0;
     const limit = 1000;
     while (true) {
         setStatus(`Laden ${statusLabel}... (${allRows.length} ingeladen)`);
-        const resp = await fetch(url + "&offset=" + offset);
-        const data = await resp.json();
+        let data;
+        try {
+            data = await fetchWithRetry(url + "&offset=" + offset, statusLabel);
+        } catch (e) {
+            break;
+        }
         const rows = (data[key] || [])
             .filter(item => item.row)
             .map(item => item.row);
@@ -170,9 +270,7 @@ async function fetchAllTariefsoorten() {
 async function fetchTariefsoortcategorieen() {
     // id, version, categorie, subcategorie
     setStatus("Laden tariefsoortcategorieën...");
-    const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoortcategorie";
-    const resp = await fetch(url);
-    const data = await resp.json();
+    let data = await fetchWithRetry("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoortcategorie", "tariefsoortcategorieën");
     return (data.tariefsoortcategorie || [])
         .filter(item => item.row)
         .map(item => ({
@@ -193,9 +291,7 @@ async function fetchAllGemeenten() {
 async function fetchProvincies() {
     // id, version, code, naam
     setStatus("Laden provincies...");
-    const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=provincie";
-    const resp = await fetch(url);
-    const data = await resp.json();
+    let data = await fetchWithRetry("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=provincie", "provincies");
     return (data.provincie || [])
         .filter(item => item.row)
         .map(item => ({
@@ -343,6 +439,77 @@ function aggregateData(
     ]);
 }
 
+// Airtable-achtige groepering, sortering, filtering
+function applyAirtableControls(table, origData) {
+    function getColIdx(field) {
+        return {
+            provincie: 0,
+            gemeente: 1,
+            categorie: 2,
+            naam: 3,
+            grondgebruik: 4,
+            percelen: 5
+        }[field];
+    }
+    function updateTable() {
+        let data = origData.slice();
+        // Filter
+        let filterField = $('#filterveld').val();
+        let filterWaarde = $('#filterwaarde').val().toLowerCase();
+        if (filterField && filterWaarde) {
+            let idx = getColIdx(filterField);
+            data = data.filter(row => (row[idx]||"").toString().toLowerCase().includes(filterWaarde));
+        }
+        // Checkboxes
+        if (window.filterNoCatActive) data = data.filter(row => row[2] === "");
+        if (window.filterPerceeltariefActive) data = data.filter(row => row[7]);
+        // Groeperen
+        let groupField = $('#groupby').val();
+        if (groupField) {
+            let idx = getColIdx(groupField);
+            // Sorteren op groepveld
+            data.sort((a,b) => (a[idx]||"").localeCompare(b[idx]||""));
+            // Voeg group header rows toe
+            let grouped = [];
+            let lastVal = null;
+            data.forEach(row => {
+                if (row[idx] !== lastVal) {
+                    grouped.push({isGroup: true, value: row[idx], field: groupField});
+                    lastVal = row[idx];
+                }
+                grouped.push(row);
+            });
+            data = grouped;
+        }
+        // Sorteren
+        let sortField = $('#sortby').val();
+        let sortDir = $('#sortdir').val();
+        if (sortField) {
+            let idx = getColIdx(sortField);
+            data.sort((a,b) => {
+                let va = (a.isGroup ? "" : a[idx]||"");
+                let vb = (b.isGroup ? "" : b[idx]||"");
+                if (sortDir === "asc") return va.localeCompare(vb, undefined, {numeric:true});
+                else return vb.localeCompare(va, undefined, {numeric:true});
+            });
+        }
+        // Herladen
+        table.clear();
+        data.forEach(row => {
+            if (row.isGroup) {
+                let colspan = table.columns().header().length;
+                table.row.add([`<strong style="color:#2d7ff9;">${row.field}: ${row.value || "(leeg)"}</strong>`].concat(Array(colspan-1).fill("")));
+            } else {
+                table.row.add(row.slice(0,6));
+            }
+        });
+        table.draw(false);
+    }
+    $('#groupby,#sortby,#sortdir,#filterveld,#filterwaarde').on('change keyup', updateTable);
+    $('#noCatFilter,#hasPerceeltariefFilter').on('change', updateTable);
+    updateTable();
+}
+
 $(async function() {
     let perceelCount = 0;
     let perceeltariefCount = 0;
@@ -372,16 +539,14 @@ $(async function() {
     );
     setStatus(`Gereed! Percelen: ${perceelCount}, perceeltarieven: ${perceeltariefCount}`);
 
-    // DataTables filter
+    // DataTables filter (voor paginering)
     $.fn.dataTable.ext.search.push(function(settings, searchData, index, rowData, counter) {
-        if (window.filterNoCatActive && !rowData[2] === "") return false;
-        if (window.filterNoCatActive && rowData[2] !== "") return false;
-        if (window.filterPerceeltariefActive && !rowData[7]) return false;
+        // Laat alles door, filtering gebeurt in airtable-controls
         return true;
     });
 
     let table = $('#tariefTable').DataTable({
-        data: data,
+        data: [],
         columns: [
             { title: "Provincie" },
             { title: "Gemeente" },
@@ -402,37 +567,14 @@ $(async function() {
             url: "//cdn.datatables.net/plug-ins/1.13.7/i18n/nl-NL.json"
         },
         autoWidth: false,
-        scrollY: 'calc(100vh - 170px)',
+        scrollY: 'calc(100vh - 200px)',
         scrollCollapse: true,
         paging: true,
         dom: '<"top"f>rt<"bottom"ip><"clear">'
     });
 
-    // Voeg beide checkboxes toe naast het zoekveld
-    let filterDiv = $('#tariefTable_filter');
-    filterDiv.append(
-        `<span class="filter-checkboxes">
-            <label>
-                <input type="checkbox" class="dt-checkbox" id="noCatFilter">
-                Alleen zonder categorie
-            </label>
-            <label>
-                <input type="checkbox" class="dt-checkbox" id="hasPerceeltariefFilter">
-                Alleen met perceeltarieven
-            </label>
-        </span>`
-    );
-
-    window.filterNoCatActive = false;
-    window.filterPerceeltariefActive = false;
-    $('#noCatFilter').on('change', function() {
-        window.filterNoCatActive = this.checked;
-        table.draw();
-    });
-    $('#hasPerceeltariefFilter').on('change', function() {
-        window.filterPerceeltariefActive = this.checked;
-        table.draw();
-    });
+    // Airtable-achtige controls
+    applyAirtableControls(table, data);
 });
 </script>
 </body>
