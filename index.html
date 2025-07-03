@@ -58,19 +58,40 @@
             vertical-align: middle;
             margin-right: 0.3em;
         }
-        table.dataTable {
-            width: 100% !important;
-            margin: 0 !important;
-            font-size: 13px;
+        .airtable-table-wrapper {
+            overflow-x: auto;
+        }
+        table.airtable-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+        table.airtable-table thead th {
+            background: #f8fafd;
+            font-weight: 600;
+            border-bottom: 2px solid #e0e0e0;
+            padding: 5px 0;
+            text-align: left;
+        }
+        table.airtable-table th,
+        table.airtable-table td {
+            width: 16.66%;
+            padding: 2px 6px;
+            box-sizing: border-box;
+            border-right: 1px solid #ececec;
+        }
+        table.airtable-table th:last-child,
+        table.airtable-table td:last-child {
+            border-right: none;
         }
         .cat-empty {
             background-color: #ffeaea !important;
         }
         /* Compacte rijen */
-        table.dataTable tbody tr {
+        table.airtable-table tbody tr {
             height: 24px;
         }
-        table.dataTable td, table.dataTable th {
+        table.airtable-table td, table.airtable-table th {
             padding-top: 2px !important;
             padding-bottom: 2px !important;
         }
@@ -117,6 +138,7 @@
             padding: 7px 16px;
             border-bottom: 1px solid #e0e0e0;
             border-radius: 7px 7px 0 0;
+            margin-bottom: 0;
         }
         .group-content {
             padding: 10px 18px 10px 18px;
@@ -126,10 +148,6 @@
             margin-right: 8px;
             margin-top: 8px;
             margin-bottom: 8px;
-        }
-        /* Zorg dat de tabel niet te breed wordt bij veel groepen */
-        .airtable-table-wrapper {
-            overflow-x: auto;
         }
     </style>
 </head>
@@ -186,7 +204,21 @@
         </span>
     </div>
     <div id="table-area">
-        <div id="airtable-table-root"></div>
+        <div class="airtable-table-wrapper">
+            <table class="airtable-table" id="airtable-table-head">
+                <thead>
+                    <tr>
+                        <th>Provincie</th>
+                        <th>Gemeente</th>
+                        <th>Categorie</th>
+                        <th>Tariefsoortnaam</th>
+                        <th>Grondgebruik</th>
+                        <th>Aantal percelen</th>
+                    </tr>
+                </thead>
+            </table>
+            <div id="airtable-table-root"></div>
+        </div>
     </div>
 </div>
 <div id="statusbar">Status: pagina geladen.</div>
@@ -199,14 +231,14 @@ async function fetchWithRetry(url, label, maxTries = 5) {
     let lastErr = null;
     while (tries < maxTries) {
         try {
-            setStatus(`Laden ${label}... poging ${tries+1}`);
+            setStatus(`Laden ${label}...`);
             let resp = await fetch(url);
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             return await resp.json();
         } catch (e) {
             lastErr = e;
             let delay = delays[Math.min(tries, delays.length-1)];
-            setStatus(`Fout bij laden ${label} (poging ${tries+1}): ${e}. Probeer opnieuw over ${delay/1000}s...`);
+            setStatus(`Fout bij laden ${label}: ${e}. Probeer opnieuw over ${delay/1000}s...`);
             if (tries === maxTries-1) break;
             if (delay > 0) await new Promise(r => setTimeout(r, delay));
         }
@@ -226,7 +258,7 @@ async function fetchPaged(url, key, statusLabel, countCb) {
     let offset = 0;
     const limit = 1000;
     while (true) {
-        setStatus(`Laden ${statusLabel}... (${allRows.length} ingeladen)`);
+        setStatus(`Laden ${statusLabel}... (${allRows.length} percelen, perceeltarieven worden apart geteld)`);
         let data;
         try {
             data = await fetchWithRetry(url + "&offset=" + offset, statusLabel);
@@ -323,7 +355,7 @@ function aggregateData(
         perceelId2grondgebruik[String(perceel[0])] = perceel[6];
     });
 
-    // Aggregatie
+    // Aggregatie: per combinatie alle unieke perceel-ids verzamelen
     // key: provincie, gemeente, categorie, naam, grondgebruik
     // waarde: {provincie, gemeente, categorie, naam, grondgebruik, perceelIds(Set), hasNoCat, hasPerceeltarief}
     const aggregation = {};
@@ -391,6 +423,7 @@ function aggregateData(
             }
         }
     }
+    // Zet om naar array
     return Object.values(aggregation).map(obj => [
         obj.provincie,
         obj.gemeente,
@@ -415,7 +448,7 @@ function getColIdx(field) {
 }
 
 // Airtable-achtige groepering, sortering, filtering, rendering
-function renderAirtableTable(data) {
+function renderAirtableTable(data, perceelCount, perceeltariefCount) {
     const groupField = $('#groupby').val();
     const sortField = $('#sortby').val();
     const sortDir = $('#sortdir').val();
@@ -464,16 +497,8 @@ function renderAirtableTable(data) {
         return grouped;
     }
 
-    // Render
     function renderTableRows(rows) {
-        let html = `<div class="airtable-table-wrapper"><table class="dataTable"><thead><tr>
-            <th>Provincie</th>
-            <th>Gemeente</th>
-            <th>Categorie</th>
-            <th>Tariefsoortnaam</th>
-            <th>Grondgebruik</th>
-            <th>Aantal percelen</th>
-        </tr></thead><tbody>`;
+        let html = "";
         for (const row of rows) {
             html += "<tr>";
             for (let i=0; i<6; ++i) {
@@ -486,7 +511,6 @@ function renderAirtableTable(data) {
             }
             html += "</tr>";
         }
-        html += "</tbody></table></div>";
         return html;
     }
 
@@ -495,9 +519,9 @@ function renderAirtableTable(data) {
         for (const group of groups) {
             html += `<div class="group-box" style="margin-left:${depth*24}px">`;
             html += `<div class="group-header">${groupField.charAt(0).toUpperCase()+groupField.slice(1)}: ${group.value || "(leeg)"}</div>`;
-            html += `<div class="group-content">`;
+            html += `<div class="group-content"><table class="airtable-table"><tbody>`;
             html += renderTableRows(group.rows);
-            html += `</div></div>`;
+            html += `</tbody></table></div></div>`;
         }
         return html;
     }
@@ -507,9 +531,12 @@ function renderAirtableTable(data) {
         let groups = groupRows(filtered, groupField);
         html = renderGroups(groups, groupField);
     } else {
-        html = renderTableRows(filtered);
+        html = `<table class="airtable-table"><tbody>` + renderTableRows(filtered) + `</tbody></table>`;
     }
     $('#airtable-table-root').html(html);
+
+    // Statusbalk updaten met actuele aantallen
+    setStatus(`Gereed! Percelen: ${perceelCount}, perceeltarieven: ${perceeltariefCount}`);
 }
 
 $(async function() {
@@ -543,14 +570,14 @@ $(async function() {
 
     // Event listeners voor alle controls
     $('#groupby,#sortby,#sortdir,#filterveld,#filterwaarde').on('change keyup', function() {
-        renderAirtableTable(data);
+        renderAirtableTable(data, perceelCount, perceeltariefCount);
     });
     $('#noCatFilter,#hasPerceeltariefFilter').on('change', function() {
-        renderAirtableTable(data);
+        renderAirtableTable(data, perceelCount, perceeltariefCount);
     });
 
     // Initieel tonen
-    renderAirtableTable(data);
+    renderAirtableTable(data, perceelCount, perceeltariefCount);
 });
 </script>
 </body>
