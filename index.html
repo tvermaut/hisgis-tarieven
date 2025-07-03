@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <title>Tariefsoortcategorieën Overzicht</title>
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        h1 { margin-bottom: 1em; }
+        table { width: 100%; }
+    </style>
+</head>
+<body>
+    <h1>Overzicht Tariefsoortcategorieën</h1>
+    <table id="tariefTable" class="display">
+        <thead>
+            <tr>
+                <th>id</th>
+                <th>categorie</th>
+                <th>subcategorie</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+
+    <!-- jQuery en DataTables JS -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script>
+    $(document).ready(function() {
+        // REST API endpoint
+        const apiUrl = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoortcategorie";
+        $.getJSON(apiUrl, function(data) {
+            const rows = data.tariefsoortcategorie
+                .filter(rowObj => rowObj.row) // Alleen rijen met data
+                .map(rowObj => {
+                    // [id, version, categorie, subcategorie]
+                    const [id, , categorie, subcategorie] = rowObj.row;
+                    return [id, categorie, subcategorie];
+                });
+
+            // Vul de tabel
+            $('#tariefTable').DataTable({
+                data: rows,
+                columns: [
+                    { title: "id" },
+                    { title: "categorie" },
+                    { title: "subcategorie" }
+                ],
+                order: [[1, 'asc']], // standaard sortering op categorie
+                language: {
+                    url: "//cdn.datatables.net/plug-ins/1.13.7/i18n/nl-NL.json"
+                }
+            });
+        });
+    });
+    </script>
+</body>
+</html>
