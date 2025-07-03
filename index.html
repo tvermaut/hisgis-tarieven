@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <title>Geaggregeerde Tariefsoorten met Categorieën</title>
+    <title>Tariefsoorten per Categorie en Naam</title>
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
     <style>
         body { font-family: Arial, sans-serif; margin: 2em; }
@@ -11,15 +11,16 @@
     </style>
 </head>
 <body>
-    <h1>Geaggregeerde Tariefsoorten met Categorieën</h1>
-    <p>Onderstaande tabel toont alle unieke tariefsoort-namen, het aantal keer dat ze voorkomen, en hun gekoppelde categorie-informatie.</p>
+    <h1>Tariefsoorten per Categorie en Naam</h1>
+    <p>Deze tabel toont per tariefsoortcategorie en tariefsoortnaam het aantal tariefsoorten.</p>
     <table id="tariefTable" class="display">
         <thead>
             <tr>
-                <th>Tariefsoort naam</th>
-                <th>Aantal tariefsoorten</th>
+                <th>Categorie-id</th>
                 <th>Categorie</th>
                 <th>Subcategorie</th>
+                <th>Tariefsoortnaam</th>
+                <th>Aantal tariefsoorten</th>
             </tr>
         </thead>
         <tbody>
@@ -29,7 +30,7 @@
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
     <script>
-    // Functie om alle tariefsoorten paginerend op te halen
+    // Haal alle tariefsoorten paginerend op
     async function fetchAllTariefsoorten() {
         let allRows = [];
         let offset = 0;
@@ -48,7 +49,7 @@
         return allRows;
     }
 
-    // Functie om tariefsoortcategorieën op te halen
+    // Haal alle tariefsoortcategorieën op
     async function fetchTariefsoortcategorieen() {
         const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoortcategorie";
         const response = await fetch(url);
@@ -64,52 +65,61 @@
         }));
     }
 
-    // Helper: aggregatie en koppeling
-    function aggregateAndJoin(tariefsoorten, categorieen) {
-        // tariefsoort kolommen: id, version, naam, omschrijving, subcategorie, categorie_id, extra1, extra2
-        // Aggregatie op naam
-        const aggregatie = {};
+    // Groepeer op categorie-id, categorie, subcategorie én tariefsoortnaam
+    function aggregateByCategorieAndNaam(tariefsoorten, categorieen) {
+        // tariefsoort: id, version, naam, omschrijving, subcategorie, categorie_id, ...
+        // categorieen: id, categorie, subcategorie
+        // Maak lookup voor categorieën
+        const catMap = {};
+        for (const cat of categorieen) {
+            catMap[String(cat.id)] = cat;
+        }
+        // Groepeer
+        const aggregation = {};
         for (const row of tariefsoorten) {
+            const categorie_id = String(row[5]);
             const naam = row[2];
-            const categorie_id = row[5];
-            if (!aggregatie[naam]) {
-                aggregatie[naam] = {count: 0, categorie_id: categorie_id};
+            const cat = catMap[categorie_id] || {categorie: '', subcategorie: ''};
+            const key = [categorie_id, cat.categorie, cat.subcategorie, naam].join('||');
+            if (!aggregation[key]) {
+                aggregation[key] = {
+                    categorie_id: categorie_id,
+                    categorie: cat.categorie,
+                    subcategorie: cat.subcategorie,
+                    naam: naam,
+                    count: 0
+                };
             }
-            aggregatie[naam].count += 1;
+            aggregation[key].count += 1;
         }
-        // Maak array en join met categorieën
-        const result = [];
-        for (const [naam, info] of Object.entries(aggregatie)) {
-            const cat = categorieen.find(c => String(c.id) === String(info.categorie_id)) || {};
-            result.push([
-                naam,
-                info.count,
-                cat.categorie || '',
-                cat.subcategorie || ''
-            ]);
-        }
-        return result;
+        // Zet om naar array
+        return Object.values(aggregation).map(obj => [
+            obj.categorie_id,
+            obj.categorie,
+            obj.subcategorie,
+            obj.naam,
+            obj.count
+        ]);
     }
 
     $(async function() {
-        // Data ophalen
         const [tariefsoorten, categorieen] = await Promise.all([
             fetchAllTariefsoorten(),
             fetchTariefsoortcategorieen()
         ]);
-        const data = aggregateAndJoin(tariefsoorten, categorieen);
+        const data = aggregateByCategorieAndNaam(tariefsoorten, categorieen);
 
-        // Tabel vullen
         $('#tariefTable').DataTable({
             data: data,
             columns: [
-                { title: "Tariefsoort naam" },
-                { title: "Aantal tariefsoorten" },
+                { title: "Categorie-id" },
                 { title: "Categorie" },
-                { title: "Subcategorie" }
+                { title: "Subcategorie" },
+                { title: "Tariefsoortnaam" },
+                { title: "Aantal tariefsoorten" }
             ],
             pageLength: 100,
-            order: [[1, 'desc']],
+            order: [[0, 'asc'], [3, 'asc']],
             language: {
                 url: "//cdn.datatables.net/plug-ins/1.13.7/i18n/nl-NL.json"
             }
