@@ -2,8 +2,7 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <title>Tariefsoortcategorieën Overzicht</title>
-    <!-- DataTables CSS -->
+    <title>Geaggregeerde Tariefsoorten met Categorieën</title>
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
     <style>
         body { font-family: Arial, sans-serif; margin: 2em; }
@@ -12,48 +11,108 @@
     </style>
 </head>
 <body>
-    <h1>Overzicht Tariefsoortcategorieën</h1>
+    <h1>Geaggregeerde Tariefsoorten met Categorieën</h1>
+    <p>Onderstaande tabel toont alle unieke tariefsoort-namen, het aantal keer dat ze voorkomen, en hun gekoppelde categorie-informatie.</p>
     <table id="tariefTable" class="display">
         <thead>
             <tr>
-                <th>id</th>
-                <th>categorie</th>
-                <th>subcategorie</th>
+                <th>Tariefsoort naam</th>
+                <th>Aantal tariefsoorten</th>
+                <th>Categorie</th>
+                <th>Subcategorie</th>
             </tr>
         </thead>
         <tbody>
         </tbody>
     </table>
 
-    <!-- jQuery en DataTables JS -->
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
     <script>
-    $(document).ready(function() {
-        // REST API endpoint
-        const apiUrl = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoortcategorie";
-        $.getJSON(apiUrl, function(data) {
-            const rows = data.tariefsoortcategorie
-                .filter(rowObj => rowObj.row) // Alleen rijen met data
-                .map(rowObj => {
-                    // [id, version, categorie, subcategorie]
-                    const [id, , categorie, subcategorie] = rowObj.row;
-                    return [id, categorie, subcategorie];
-                });
+    // Functie om alle tariefsoorten paginerend op te halen
+    async function fetchAllTariefsoorten() {
+        let allRows = [];
+        let offset = 0;
+        const limit = 1000;
+        while (true) {
+            const url = `https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoort&offset=${offset}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            const rows = (data.tariefsoort || [])
+                .filter(item => item.row)
+                .map(item => item.row);
+            allRows = allRows.concat(rows);
+            if (rows.length < limit) break;
+            offset += limit;
+        }
+        return allRows;
+    }
 
-            // Vul de tabel
-            $('#tariefTable').DataTable({
-                data: rows,
-                columns: [
-                    { title: "id" },
-                    { title: "categorie" },
-                    { title: "subcategorie" }
-                ],
-                order: [[1, 'asc']], // standaard sortering op categorie
-                language: {
-                    url: "//cdn.datatables.net/plug-ins/1.13.7/i18n/nl-NL.json"
-                }
-            });
+    // Functie om tariefsoortcategorieën op te halen
+    async function fetchTariefsoortcategorieen() {
+        const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoortcategorie";
+        const response = await fetch(url);
+        const data = await response.json();
+        const rows = (data.tariefsoortcategorie || [])
+            .filter(item => item.row)
+            .map(item => item.row);
+        // id, version, categorie, subcategorie
+        return rows.map(r => ({
+            id: r[0],
+            categorie: r[2],
+            subcategorie: r[3]
+        }));
+    }
+
+    // Helper: aggregatie en koppeling
+    function aggregateAndJoin(tariefsoorten, categorieen) {
+        // tariefsoort kolommen: id, version, naam, omschrijving, subcategorie, categorie_id, extra1, extra2
+        // Aggregatie op naam
+        const aggregatie = {};
+        for (const row of tariefsoorten) {
+            const naam = row[2];
+            const categorie_id = row[5];
+            if (!aggregatie[naam]) {
+                aggregatie[naam] = {count: 0, categorie_id: categorie_id};
+            }
+            aggregatie[naam].count += 1;
+        }
+        // Maak array en join met categorieën
+        const result = [];
+        for (const [naam, info] of Object.entries(aggregatie)) {
+            const cat = categorieen.find(c => String(c.id) === String(info.categorie_id)) || {};
+            result.push([
+                naam,
+                info.count,
+                cat.categorie || '',
+                cat.subcategorie || ''
+            ]);
+        }
+        return result;
+    }
+
+    $(async function() {
+        // Data ophalen
+        const [tariefsoorten, categorieen] = await Promise.all([
+            fetchAllTariefsoorten(),
+            fetchTariefsoortcategorieen()
+        ]);
+        const data = aggregateAndJoin(tariefsoorten, categorieen);
+
+        // Tabel vullen
+        $('#tariefTable').DataTable({
+            data: data,
+            columns: [
+                { title: "Tariefsoort naam" },
+                { title: "Aantal tariefsoorten" },
+                { title: "Categorie" },
+                { title: "Subcategorie" }
+            ],
+            pageLength: 100,
+            order: [[1, 'desc']],
+            language: {
+                url: "//cdn.datatables.net/plug-ins/1.13.7/i18n/nl-NL.json"
+            }
         });
     });
     </script>
