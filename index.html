@@ -67,7 +67,7 @@
 
     // Groepeer op categorie-id, categorie, subcategorie én tariefsoortnaam
     function aggregateByCategorieAndNaam(tariefsoorten, categorieen) {
-        // tariefsoort: id, version, naam, omschrijving, subcategorie, categorie_id, ...
+        // tariefsoort: id, version, aantal, naam, type, gemeente_id, opmerking, categorie_id
         // categorieen: id, categorie, subcategorie
         // Maak lookup voor categorieën
         const catMap = {};
@@ -77,8 +77,8 @@
         // Groepeer
         const aggregation = {};
         for (const row of tariefsoorten) {
-            const categorie_id = String(row[5]);
-            const naam = row[2];
+            const categorie_id = String(row[7]);
+            const naam = row[3];
             const cat = catMap[categorie_id] || {categorie: '', subcategorie: ''};
             const key = [categorie_id, cat.categorie, cat.subcategorie, naam].join('||');
             if (!aggregation[key]) {
