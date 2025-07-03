@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <title>Tariefsoorten per Categorie, Gemeente en Provincie</title>
+    <title>Tariefsoorten per Categorie, Gemeente, Provincie en Grondgebruik</title>
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
     <style>
         html, body {
@@ -68,6 +68,7 @@
         table.dataTable {
             width: 100% !important;
             margin: 0 !important;
+            font-size: 13px;
         }
         .dataTables_wrapper {
             padding: 0 !important;
@@ -85,6 +86,14 @@
         .cat-empty {
             background-color: #ffeaea !important;
         }
+        /* Compacte rijen */
+        table.dataTable tbody tr {
+            height: 24px;
+        }
+        table.dataTable td, table.dataTable th {
+            padding-top: 2px !important;
+            padding-bottom: 2px !important;
+        }
     </style>
 </head>
 <body>
@@ -97,7 +106,9 @@
                     <th>Gemeente</th>
                     <th>Categorie</th>
                     <th>Tariefsoortnaam</th>
-                    <th>Aantal tariefsoorten</th>
+                    <th>Grondgebruik</th>
+                    <th>Aantal percelen</th>
+                    <th>Aantal percelen met dit grondgebruik</th>
                 </tr>
             </thead>
             <tbody>
@@ -108,15 +119,14 @@
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
 <script>
-async function fetchAllTariefsoorten() {
+async function fetchPaged(url, key) {
     let allRows = [];
     let offset = 0;
     const limit = 1000;
     while (true) {
-        const url = `https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoort&offset=${offset}`;
-        const response = await fetch(url);
-        const data = await response.json();
-        const rows = (data.tariefsoort || [])
+        const resp = await fetch(url + "&offset=" + offset);
+        const data = await resp.json();
+        const rows = (data[key] || [])
             .filter(item => item.row)
             .map(item => item.row);
         allRows = allRows.concat(rows);
@@ -126,56 +136,55 @@ async function fetchAllTariefsoorten() {
     return allRows;
 }
 
+async function fetchAllTariefsoorten() {
+    // id, version, aantal, naam, type, gemeente_id, opmerking, categorie_id
+    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoort", "tariefsoort");
+}
 async function fetchTariefsoortcategorieen() {
-    const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoortcategorie";
-    const response = await fetch(url);
-    const data = await response.json();
-    const rows = (data.tariefsoortcategorie || [])
-        .filter(item => item.row)
-        .map(item => item.row);
     // id, version, categorie, subcategorie
-    return rows.map(r => ({
-        id: r[0],
-        categorie: r[2],
-        subcategorie: r[3]
-    }));
-}
-
-async function fetchAllGemeenten() {
-    let allRows = [];
-    let offset = 0;
-    const limit = 1000;
-    while (true) {
-        const url = `https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=gemeente&offset=${offset}`;
-        const response = await fetch(url);
-        const data = await response.json();
-        const rows = (data.gemeente || [])
-            .filter(item => item.row)
-            .map(item => item.row);
-        allRows = allRows.concat(rows);
-        if (rows.length < limit) break;
-        offset += limit;
-    }
-    // id, version, code, kadastralecode, naam, oatmodel, uniekenaam, provincie_id, status, opmerking
-    return allRows.map(r => ({
-        id: r[0],
-        uniekenaam: r[6],
-        provincie_id: r[7]
-    }));
-}
-
-async function fetchProvincies() {
-    const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=provincie";
-    const response = await fetch(url);
-    const data = await response.json();
-    const rows = (data.provincie || [])
+    const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoortcategorie";
+    const resp = await fetch(url);
+    const data = await resp.json();
+    return (data.tariefsoortcategorie || [])
         .filter(item => item.row)
-        .map(item => item.row);
+        .map(item => ({
+            id: item.row[0],
+            categorie: item.row[2],
+            subcategorie: item.row[3]
+        }));
+}
+async function fetchAllGemeenten() {
+    // id, version, code, kadastralecode, naam, oatmodel, uniekenaam, provincie_id, status, opmerking
+    return (await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=gemeente", "gemeente"))
+        .map(r => ({
+            id: r[0],
+            uniekenaam: r[6],
+            provincie_id: r[7]
+        }));
+}
+async function fetchProvincies() {
     // id, version, code, naam
-    return rows.map(r => ({
-        id: r[0],
-        naam: r[3]
-    }));
+    const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=provincie";
+    const resp = await fetch(url);
+    const data = await resp.json();
+    return (data.provincie || [])
+        .filter(item => item.row)
+        .map(item => ({
+            id: item.row[0],
+            naam: item.row[3]
+        }));
+}
+async function fetchAllTarieven() {
+    // id, version, tariefsoort_id, ... (rest niet relevant)
+    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tarief", "tarief");
+}
+async function fetchAllPerceeltarieven() {
+    // id, version, perceel_id, tarief_id
+    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceeltarief", "perceeltarief");
+}
+async function fetchAllPercelen() {
+    // id, version, grondgebruik, ...
+    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceel", "perceel");
 }
 
 function combineCategorie(cat, subcat) {
@@ -185,53 +194,123 @@ function combineCategorie(cat, subcat) {
     return "";
 }
 
-function aggregateData(tariefsoorten, categorieen, gemeenten, provincies) {
+function aggregateData(
+    tariefsoorten, categorieen, gemeenten, provincies,
+    tarieven, perceeltarieven, percelen
+) {
+    // Indexes for fast lookup
     const catMap = {};
-    for (const cat of categorieen) {
-        catMap[String(cat.id)] = cat;
-    }
+    categorieen.forEach(cat => { catMap[String(cat.id)] = cat; });
     const gemeenteMap = {};
-    for (const gem of gemeenten) {
-        gemeenteMap[String(gem.id)] = gem;
-    }
+    gemeenten.forEach(gem => { gemeenteMap[String(gem.id)] = gem; });
     const provincieMap = {};
-    for (const prov of provincies) {
-        provincieMap[String(prov.id)] = prov.naam;
-    }
+    provincies.forEach(prov => { provincieMap[String(prov.id)] = prov.naam; });
+    // tariefsoort.id -> tarief.id[]
+    const tariefsoort2tarieven = {};
+    tarieven.forEach(tarief => {
+        const tariefsoort_id = String(tarief[2]);
+        if (!tariefsoort2tarieven[tariefsoort_id]) tariefsoort2tarieven[tariefsoort_id] = [];
+        tariefsoort2tarieven[tariefsoort_id].push(tarief[0]);
+    });
+    // tarief.id -> perceeltarief[]
+    const tarief2perceeltarieven = {};
+    perceeltarieven.forEach(pt => {
+        const tarief_id = String(pt[3]);
+        if (!tarief2perceeltarieven[tarief_id]) tarief2perceeltarieven[tarief_id] = [];
+        tarief2perceeltarieven[tarief_id].push(pt);
+    });
+    // perceel.id -> grondgebruik
+    const perceelId2grondgebruik = {};
+    percelen.forEach(perceel => {
+        perceelId2grondgebruik[String(perceel[0])] = perceel[2];
+    });
+
+    // Aggregatie
+    // key: provincie, gemeente, categorie, naam, grondgebruik
+    // waarde: {provincie, gemeente, categorie, naam, grondgebruik, somAantal, percelenSet}
     const aggregation = {};
     for (const row of tariefsoorten) {
-        // Filter 'polder' opmerkingen
-        const opmerking = row[6];
-        if (opmerking && typeof opmerking === "string" && opmerking.trim().toLowerCase().startsWith('polder')) continue;
-        const categorie_id = row[7] !== undefined && row[7] !== null && row[7] !== "" ? String(row[7]) : null;
+        // id, version, aantal, naam, type, gemeente_id, opmerking, categorie_id
+        const id = String(row[0]);
+        const aantal = Number(row[2]) || 0;
         const naam = row[3];
         const gemeente_id = row[5] !== undefined && row[5] !== null && row[5] !== "" ? String(row[5]) : null;
-        let cat = categorie_id && catMap[categorie_id] ? catMap[categorie_id] : null;
-        let catLabel = cat ? combineCategorie(cat.categorie, cat.subcategorie) : "";
+        const categorie_id = row[7] !== undefined && row[7] !== null && row[7] !== "" ? String(row[7]) : null;
+        const opmerking = row[6];
+        // Filter 'polder' opmerkingen
+        if (opmerking && typeof opmerking === "string" && opmerking.trim().toLowerCase().startsWith('polder')) continue;
+        // Gemeente, provincie, categorie
         let gemeente = gemeente_id && gemeenteMap[gemeente_id] ? gemeenteMap[gemeente_id] : null;
         let gemeenteNaam = gemeente ? gemeente.uniekenaam : "";
         let provincieNaam = (gemeente && gemeente.provincie_id && provincieMap[gemeente.provincie_id]) ? provincieMap[gemeente.provincie_id] : "";
-        let key = [provincieNaam, gemeenteNaam, catLabel, naam].join('||');
+        let cat = categorie_id && catMap[categorie_id] ? catMap[categorie_id] : null;
+        let catLabel = cat ? combineCategorie(cat.categorie, cat.subcategorie) : "";
         let hasNoCat = !categorie_id;
-        if (!aggregation[key]) {
-            aggregation[key] = {
-                provincie: provincieNaam,
-                gemeente: gemeenteNaam,
-                categorie: catLabel,
-                naam: naam,
-                count: 0,
-                hasNoCat: hasNoCat
-            };
+        // Alle tarief.id's voor deze tariefsoort
+        let tariefIds = tariefsoort2tarieven[id] || [];
+        // Verzamel alle perceel_ids via tarief -> perceeltarief
+        let perceelIds = [];
+        for (const tariefId of tariefIds) {
+            const pts = tarief2perceeltarieven[tariefId] || [];
+            for (const pt of pts) {
+                // id, version, perceel_id, tarief_id
+                if (pt[2] !== undefined && pt[2] !== null && pt[2] !== "") {
+                    perceelIds.push(String(pt[2]));
+                }
+            }
         }
-        aggregation[key].count += 1;
+        // Groepeer per grondgebruik
+        const grondgebruik2percelen = {};
+        for (const perceelId of perceelIds) {
+            const grondgebruik = perceelId2grondgebruik[perceelId] || "";
+            if (!grondgebruik2percelen[grondgebruik]) grondgebruik2percelen[grondgebruik] = new Set();
+            grondgebruik2percelen[grondgebruik].add(perceelId);
+        }
+        // Als er geen percelen zijn, toch een groep aanmaken met lege grondgebruik
+        if (Object.keys(grondgebruik2percelen).length === 0) {
+            const key = [provincieNaam, gemeenteNaam, catLabel, naam, ""].join('||');
+            if (!aggregation[key]) {
+                aggregation[key] = {
+                    provincie: provincieNaam,
+                    gemeente: gemeenteNaam,
+                    categorie: catLabel,
+                    naam: naam,
+                    grondgebruik: "",
+                    somAantal: 0,
+                    countPercelen: 0,
+                    hasNoCat: hasNoCat
+                };
+            }
+            aggregation[key].somAantal += aantal;
+        } else {
+            for (const [grondgebruik, percelenSet] of Object.entries(grondgebruik2percelen)) {
+                const key = [provincieNaam, gemeenteNaam, catLabel, naam, grondgebruik].join('||');
+                if (!aggregation[key]) {
+                    aggregation[key] = {
+                        provincie: provincieNaam,
+                        gemeente: gemeenteNaam,
+                        categorie: catLabel,
+                        naam: naam,
+                        grondgebruik: grondgebruik,
+                        somAantal: 0,
+                        countPercelen: 0,
+                        hasNoCat: hasNoCat
+                    };
+                }
+                aggregation[key].somAantal += aantal;
+                aggregation[key].countPercelen += percelenSet.size;
+            }
+        }
     }
     return Object.values(aggregation).map(obj => [
         obj.provincie,
         obj.gemeente,
         obj.categorie,
         obj.naam,
-        obj.count,
-        obj.hasNoCat // voor filter
+        obj.grondgebruik,
+        obj.somAantal,
+        obj.countPercelen,
+        obj.hasNoCat
     ]);
 }
 
@@ -270,13 +349,22 @@ function mergeProvinceCells(table) {
 }
 
 $(async function() {
-    const [tariefsoorten, categorieen, gemeenten, provincies] = await Promise.all([
+    const [
+        tariefsoorten, categorieen, gemeenten, provincies,
+        tarieven, perceeltarieven, percelen
+    ] = await Promise.all([
         fetchAllTariefsoorten(),
         fetchTariefsoortcategorieen(),
         fetchAllGemeenten(),
-        fetchProvincies()
+        fetchProvincies(),
+        fetchAllTarieven(),
+        fetchAllPerceeltarieven(),
+        fetchAllPercelen()
     ]);
-    const data = aggregateData(tariefsoorten, categorieen, gemeenten, provincies);
+    const data = aggregateData(
+        tariefsoorten, categorieen, gemeenten, provincies,
+        tarieven, perceeltarieven, percelen
+    );
 
     $.fn.dataTable.ext.search.push(function(settings, searchData, index, rowData, counter) {
         if (window.filterNoCatActive) {
@@ -299,7 +387,9 @@ $(async function() {
               }
             },
             { title: "Tariefsoortnaam" },
-            { title: "Aantal tariefsoorten", className: "dt-right" }
+            { title: "Grondgebruik" },
+            { title: "Aantal percelen", className: "dt-right" },
+            { title: "Aantal percelen met dit grondgebruik", className: "dt-right" }
         ],
         pageLength: 100,
         order: [[0, 'asc'], [1, 'asc']],
