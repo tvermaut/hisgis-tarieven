@@ -322,7 +322,6 @@ function updateBar() {
     $("#groupby-add").toggle(groupbyFields.length<3);
     $("#sortby-add").toggle(sortbyFields.length<3);
     $("#filter-add").toggle(filterFields.length<3);
-    // Checkboxes
     $("#noCatFilter").prop("checked", checkboxState.noCat);
     $("#hasPerceeltariefFilter").prop("checked", checkboxState.hasPerceeltarief);
 }
@@ -460,10 +459,12 @@ function combineCategorie(cat, subcat) {
     if (subcat) return subcat;
     return "";
 }
-function aggregateData(
+function aggregateDataDynamic(
     tariefsoorten, categorieen, gemeenten, provincies,
-    tarieven, perceeltarieven, percelen
+    tarieven, perceeltarieven, percelen,
+    groupbyFields
 ) {
+    // Indexes
     const catMap = {};
     categorieen.forEach(cat => { catMap[String(cat.id)] = cat; });
     const gemeenteMap = {};
@@ -486,7 +487,8 @@ function aggregateData(
     percelen.forEach(perceel => {
         perceelId2grondgebruik[String(perceel[0])] = perceel[6];
     });
-    const aggregation = {};
+    // Verzamel alle rijen met hun eigenschappen
+    let rows = [];
     for (const row of tariefsoorten) {
         const id = String(row[0]);
         const naam = row[3];
@@ -510,58 +512,80 @@ function aggregateData(
                 }
             }
         }
-        const grondgebruik2percelen = {};
+        // Perceel grondgebruik
+        let perceelGrondgebruik = {};
         for (const perceelId of perceelIds) {
-            const grondgebruik = perceelId2grondgebruik[perceelId] || "";
-            if (!grondgebruik2percelen[grondgebruik]) grondgebruik2percelen[grondgebruik] = new Set();
-            grondgebruik2percelen[grondgebruik].add(perceelId);
+            perceelGrondgebruik[perceelId] = perceelId2grondgebruik[perceelId] || "";
         }
-        if (Object.keys(grondgebruik2percelen).length === 0) {
-            const key = [provincieNaam, gemeenteNaam, catLabel, naam, ""].join('||');
-            if (!aggregation[key]) {
-                aggregation[key] = {
-                    provincie: provincieNaam,
-                    gemeente: gemeenteNaam,
-                    categorie: catLabel,
-                    naam: naam,
-                    grondgebruik: "",
-                    perceelIds: new Set(),
-                    hasNoCat: hasNoCat,
-                    hasPerceeltarief: false
-                };
-            }
+        // Voor elk perceel, push een rij met alle mogelijke velden
+        if (perceelIds.length === 0) {
+            rows.push([
+                provincieNaam,
+                gemeenteNaam,
+                catLabel,
+                naam,
+                "",
+                null, // perceelId
+                hasNoCat,
+                false // hasPerceeltarief
+            ]);
         } else {
-            for (const [grondgebruik, percelenSet] of Object.entries(grondgebruik2percelen)) {
-                const key = [provincieNaam, gemeenteNaam, catLabel, naam, grondgebruik].join('||');
-                if (!aggregation[key]) {
-                    aggregation[key] = {
-                        provincie: provincieNaam,
-                        gemeente: gemeenteNaam,
-                        categorie: catLabel,
-                        naam: naam,
-                        grondgebruik: grondgebruik,
-                        perceelIds: new Set(),
-                        hasNoCat: hasNoCat,
-                        hasPerceeltarief: false
-                    };
-                }
-                percelenSet.forEach(pid => aggregation[key].perceelIds.add(pid));
-                aggregation[key].hasPerceeltarief = true;
+            let perceelSet = new Set();
+            for (const perceelId of perceelIds) {
+                if (perceelSet.has(perceelId)) continue; // uniek per tariefsoort
+                perceelSet.add(perceelId);
+                rows.push([
+                    provincieNaam,
+                    gemeenteNaam,
+                    catLabel,
+                    naam,
+                    perceelGrondgebruik[perceelId] || "",
+                    perceelId,
+                    hasNoCat,
+                    true
+                ]);
             }
         }
     }
-    return Object.values(aggregation).map(obj => [
-        obj.provincie,
-        obj.gemeente,
-        obj.categorie,
-        obj.naam,
-        obj.grondgebruik,
-        obj.perceelIds.size,
-        obj.hasNoCat,
-        obj.hasPerceeltarief
-    ]);
+    // Dynamische aggregatie op groupbyFields
+    let idxs = groupbyFields.map(getColIdx);
+    let agg = {};
+    for (const row of rows) {
+        // key is de geselecteerde groupby-velden
+        let key = idxs.map(i => row[i] || "").join("||");
+        if (!agg[key]) {
+            // Vul alle velden in, behalve "Aantal percelen" (die komt straks)
+            let base = [];
+            for (let i=0; i<6; ++i) {
+                if (i === 5) base[i] = 0; // aantal percelen
+                else base[i] = row[i];
+            }
+            base[6] = row[6]; // hasNoCat
+            base[7] = row[7]; // hasPerceeltarief
+            base.perceelSet = new Set();
+            agg[key] = base;
+        }
+        if (row[5]) agg[key].perceelSet.add(row[5]);
+        if (row[7]) agg[key][7] = true;
+    }
+    // Zet om naar array, tel aantal unieke percelen
+    let out = [];
+    for (let k in agg) {
+        let base = agg[k];
+        base[5] = base.perceelSet.size;
+        delete base.perceelSet;
+        out.push(base);
+    }
+    return out;
 }
-function renderAirtableTable(data, perceelCount, perceeltariefCount) {
+function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
+    // Dynamisch aggregeren op groupbyFields
+    let data = aggregateDataDynamic(
+        dataRaw.tariefsoorten, dataRaw.categorieen, dataRaw.gemeenten, dataRaw.provincies,
+        dataRaw.tarieven, dataRaw.perceeltarieven, dataRaw.percelen,
+        groupbyFields
+    );
+    // Filter
     let filtered = data.filter(row => {
         for (let f of filterFields) {
             let idx = getColIdx(f.field);
@@ -571,6 +595,7 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
         if ($("#hasPerceeltariefFilter").prop("checked") && !row[7]) return false;
         return true;
     });
+    // Sorteren
     if (sortbyFields.length) {
         filtered.sort((a,b) => {
             for (let s of sortbyFields) {
@@ -583,6 +608,7 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
             return 0;
         });
     }
+    // Groeperen (meervoudig, recursief)
     function groupRows(rows, groupFields, depth=0) {
         if (!groupFields.length) return rows;
         let idx = getColIdx(groupFields[0]);
@@ -671,69 +697,69 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
         e.stopPropagation();
     });
 }
-function attachBarEvents(data, perceelCount, perceeltariefCount) {
+function attachBarEvents(dataRaw, perceelCount, perceeltariefCount) {
     $('#groupby-add').off().on('click', function() {
         let used = new Set(groupbyFields);
         let next = FIELD_OPTIONS.map(f=>f.value).find(v=>!used.has(v) && v!=="percelen");
         if (next) groupbyFields.push(next);
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#groupby-rows').on('change', 'select[name=groupby]', function() {
         let idx = $(this).parent().index();
         groupbyFields[idx] = $(this).val();
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#groupby-rows').on('click', '.airtablebar-remove', function() {
         let idx = parseInt($(this).data('idx'),10);
         groupbyFields.splice(idx,1);
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#sortby-add').off().on('click', function() {
         let used = new Set(sortbyFields.map(s=>s.field));
         let next = FIELD_OPTIONS.map(f=>f.value).find(v=>!used.has(v));
         if (next) sortbyFields.push({field: next, dir: "asc"});
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#sortby-rows').on('change', 'select[name=sortby]', function() {
         let idx = $(this).parent().index();
         sortbyFields[idx].field = $(this).val();
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#sortby-rows').on('change', 'select[name=sortdir]', function() {
         let idx = $(this).parent().index();
         sortbyFields[idx].dir = $(this).val();
-        renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#sortby-rows').on('click', '.airtablebar-remove', function() {
         let idx = parseInt($(this).data('idx'),10);
         sortbyFields.splice(idx,1);
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#filter-add').off().on('click', function() {
         let used = new Set(filterFields.map(f=>f.field));
         let next = FIELD_OPTIONS.map(f=>f.value).find(v=>!used.has(v));
         if (next) filterFields.push({field: next, waarde: ""});
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#filter-rows').on('change', 'select[name=filterveld]', function() {
         let idx = $(this).parent().index();
         filterFields[idx].field = $(this).val();
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#filter-rows').on('input', 'input[name=filterwaarde]', function() {
         let idx = $(this).parent().index();
         filterFields[idx].waarde = $(this).val();
-        renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#filter-rows').on('click', '.airtablebar-remove', function() {
         let idx = parseInt($(this).data('idx'),10);
         filterFields.splice(idx,1);
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#noCatFilter,#hasPerceeltariefFilter').on('change', function() {
         checkboxState.noCat = $("#noCatFilter").prop("checked");
         checkboxState.hasPerceeltarief = $("#hasPerceeltariefFilter").prop("checked");
-        renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
+        renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
 }
 $(async function() {
@@ -758,14 +784,14 @@ $(async function() {
         updateStatusLoading();
     });
     setStatus(`Aggregatie van gegevens...`);
-    const data = aggregateData(
+    const dataRaw = {
         tariefsoorten, categorieen, gemeenten, provincies,
         tarieven, perceeltarieven, percelen
-    );
+    };
     setStatus(`Gereed! Percelen: ${perceelCount}, perceeltarieven: ${perceeltariefCount}`);
     updateBar();
-    attachBarEvents(data, perceelCount, perceeltariefCount);
-    renderAirtableTable(data, perceelCount, perceeltariefCount);
+    attachBarEvents(dataRaw, perceelCount, perceeltariefCount);
+    renderAirtableTable(dataRaw, perceelCount, perceeltariefCount);
 });
 </script>
 </body>
