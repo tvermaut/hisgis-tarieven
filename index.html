@@ -108,7 +108,6 @@
                     <th>Tariefsoortnaam</th>
                     <th>Grondgebruik</th>
                     <th>Aantal percelen</th>
-                    <th>Aantal percelen met dit grondgebruik</th>
                 </tr>
             </thead>
             <tbody>
@@ -175,15 +174,15 @@ async function fetchProvincies() {
         }));
 }
 async function fetchAllTarieven() {
-    // id, version, tariefsoort_id, ... (rest niet relevant)
+    // id, version, klasse, tarief, tariefsoort_id, opmerking, grondgebruik_id
     return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tarief", "tarief");
 }
 async function fetchAllPerceeltarieven() {
-    // id, version, perceel_id, tarief_id
+    // id, version, oppervlak, perceel_id, tarief_id, tariefverwijzing_id, importbatch_id, importcontextnr
     return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceeltarief", "perceeltarief");
 }
 async function fetchAllPercelen() {
-    // id, version, grondgebruik, ...
+    // id, version, aftrek, belastbaar_inkomen, belastbaar_inkomen_gebouwd, geschrapt, grondgebruik, oppervlak, opvolgnrs, perceelnr, perceelnrtvg, plaatselijke_benaming, sat, toponiem, volgnr, volgnrtvg, artikel_id, oatscan_id, sectie_id, nok, perceelverwijzing_id, accepteer, geengebouw, impotbatch_id, importcontextnr
     return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceel", "perceel");
 }
 
@@ -208,31 +207,33 @@ function aggregateData(
     // tariefsoort.id -> tarief.id[]
     const tariefsoort2tarieven = {};
     tarieven.forEach(tarief => {
-        const tariefsoort_id = String(tarief[2]);
+        // tarief: id, version, klasse, tarief, tariefsoort_id, opmerking, grondgebruik_id
+        const tariefsoort_id = String(tarief[4]);
         if (!tariefsoort2tarieven[tariefsoort_id]) tariefsoort2tarieven[tariefsoort_id] = [];
         tariefsoort2tarieven[tariefsoort_id].push(tarief[0]);
     });
     // tarief.id -> perceeltarief[]
     const tarief2perceeltarieven = {};
     perceeltarieven.forEach(pt => {
-        const tarief_id = String(pt[3]);
+        // perceeltarief: id, version, oppervlak, perceel_id, tarief_id, tariefverwijzing_id, importbatch_id, importcontextnr
+        const tarief_id = String(pt[4]);
         if (!tarief2perceeltarieven[tarief_id]) tarief2perceeltarieven[tarief_id] = [];
         tarief2perceeltarieven[tarief_id].push(pt);
     });
     // perceel.id -> grondgebruik
     const perceelId2grondgebruik = {};
     percelen.forEach(perceel => {
-        perceelId2grondgebruik[String(perceel[0])] = perceel[2];
+        // perceel: id, version, aftrek, belastbaar_inkomen, belastbaar_inkomen_gebouwd, geschrapt, grondgebruik, ...
+        perceelId2grondgebruik[String(perceel[0])] = perceel[6];
     });
 
     // Aggregatie
     // key: provincie, gemeente, categorie, naam, grondgebruik
-    // waarde: {provincie, gemeente, categorie, naam, grondgebruik, somAantal, percelenSet}
+    // waarde: {provincie, gemeente, categorie, naam, grondgebruik, perceelIds(Set), hasNoCat}
     const aggregation = {};
     for (const row of tariefsoorten) {
         // id, version, aantal, naam, type, gemeente_id, opmerking, categorie_id
         const id = String(row[0]);
-        const aantal = Number(row[2]) || 0;
         const naam = row[3];
         const gemeente_id = row[5] !== undefined && row[5] !== null && row[5] !== "" ? String(row[5]) : null;
         const categorie_id = row[7] !== undefined && row[7] !== null && row[7] !== "" ? String(row[7]) : null;
@@ -253,9 +254,9 @@ function aggregateData(
         for (const tariefId of tariefIds) {
             const pts = tarief2perceeltarieven[tariefId] || [];
             for (const pt of pts) {
-                // id, version, perceel_id, tarief_id
-                if (pt[2] !== undefined && pt[2] !== null && pt[2] !== "") {
-                    perceelIds.push(String(pt[2]));
+                // pt: id, version, oppervlak, perceel_id, tarief_id, ...
+                if (pt[3] !== undefined && pt[3] !== null && pt[3] !== "") {
+                    perceelIds.push(String(pt[3]));
                 }
             }
         }
@@ -276,12 +277,10 @@ function aggregateData(
                     categorie: catLabel,
                     naam: naam,
                     grondgebruik: "",
-                    somAantal: 0,
-                    countPercelen: 0,
+                    perceelIds: new Set(),
                     hasNoCat: hasNoCat
                 };
             }
-            aggregation[key].somAantal += aantal;
         } else {
             for (const [grondgebruik, percelenSet] of Object.entries(grondgebruik2percelen)) {
                 const key = [provincieNaam, gemeenteNaam, catLabel, naam, grondgebruik].join('||');
@@ -292,13 +291,11 @@ function aggregateData(
                         categorie: catLabel,
                         naam: naam,
                         grondgebruik: grondgebruik,
-                        somAantal: 0,
-                        countPercelen: 0,
+                        perceelIds: new Set(),
                         hasNoCat: hasNoCat
                     };
                 }
-                aggregation[key].somAantal += aantal;
-                aggregation[key].countPercelen += percelenSet.size;
+                percelenSet.forEach(pid => aggregation[key].perceelIds.add(pid));
             }
         }
     }
@@ -308,8 +305,7 @@ function aggregateData(
         obj.categorie,
         obj.naam,
         obj.grondgebruik,
-        obj.somAantal,
-        obj.countPercelen,
+        obj.perceelIds.size,
         obj.hasNoCat
     ]);
 }
@@ -388,8 +384,7 @@ $(async function() {
             },
             { title: "Tariefsoortnaam" },
             { title: "Grondgebruik" },
-            { title: "Aantal percelen", className: "dt-right" },
-            { title: "Aantal percelen met dit grondgebruik", className: "dt-right" }
+            { title: "Aantal percelen", className: "dt-right" }
         ],
         pageLength: 100,
         order: [[0, 'asc'], [1, 'asc']],
