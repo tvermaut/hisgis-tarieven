@@ -54,9 +54,12 @@
             float: left !important;
             margin-bottom: 0.5em;
         }
-        #noCatFilterLabel {
+        .filter-checkboxes {
             display: inline-block;
             margin-left: 1em;
+        }
+        .filter-checkboxes label {
+            margin-right: 1.5em;
             font-weight: normal;
             font-size: 1em;
             vertical-align: middle;
@@ -94,6 +97,23 @@
             padding-top: 2px !important;
             padding-bottom: 2px !important;
         }
+        #statusbar {
+            width: 100vw;
+            min-height: 26px;
+            background: #f8f8f8;
+            color: #333;
+            font-size: 13px;
+            font-family: monospace;
+            border-top: 1px solid #ddd;
+            box-sizing: border-box;
+            padding: 3px 12px 3px 12px;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+        }
     </style>
 </head>
 <body>
@@ -115,20 +135,28 @@
         </table>
     </div>
 </div>
+<div id="statusbar">Status: pagina geladen.</div>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
 <script>
-async function fetchPaged(url, key) {
+function setStatus(msg) {
+    document.getElementById('statusbar').textContent = msg;
+}
+
+// REST helpers met status
+async function fetchPaged(url, key, statusLabel, countCb) {
     let allRows = [];
     let offset = 0;
     const limit = 1000;
     while (true) {
+        setStatus(`Laden ${statusLabel}... (${allRows.length} ingeladen)`);
         const resp = await fetch(url + "&offset=" + offset);
         const data = await resp.json();
         const rows = (data[key] || [])
             .filter(item => item.row)
             .map(item => item.row);
         allRows = allRows.concat(rows);
+        if (typeof countCb === "function") countCb(allRows.length);
         if (rows.length < limit) break;
         offset += limit;
     }
@@ -137,10 +165,11 @@ async function fetchPaged(url, key) {
 
 async function fetchAllTariefsoorten() {
     // id, version, aantal, naam, type, gemeente_id, opmerking, categorie_id
-    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoort", "tariefsoort");
+    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoort", "tariefsoort", "tariefsoorten");
 }
 async function fetchTariefsoortcategorieen() {
     // id, version, categorie, subcategorie
+    setStatus("Laden tariefsoortcategorieën...");
     const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tariefsoortcategorie";
     const resp = await fetch(url);
     const data = await resp.json();
@@ -154,7 +183,7 @@ async function fetchTariefsoortcategorieen() {
 }
 async function fetchAllGemeenten() {
     // id, version, code, kadastralecode, naam, oatmodel, uniekenaam, provincie_id, status, opmerking
-    return (await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=gemeente", "gemeente"))
+    return (await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=gemeente", "gemeente", "gemeenten"))
         .map(r => ({
             id: r[0],
             uniekenaam: r[6],
@@ -163,6 +192,7 @@ async function fetchAllGemeenten() {
 }
 async function fetchProvincies() {
     // id, version, code, naam
+    setStatus("Laden provincies...");
     const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=provincie";
     const resp = await fetch(url);
     const data = await resp.json();
@@ -175,15 +205,15 @@ async function fetchProvincies() {
 }
 async function fetchAllTarieven() {
     // id, version, klasse, tarief, tariefsoort_id, opmerking, grondgebruik_id
-    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tarief", "tarief");
+    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=tarief", "tarief", "tarieven");
 }
-async function fetchAllPerceeltarieven() {
+async function fetchAllPerceeltarieven(perceeltariefCountCb) {
     // id, version, oppervlak, perceel_id, tarief_id, tariefverwijzing_id, importbatch_id, importcontextnr
-    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceeltarief", "perceeltarief");
+    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceeltarief", "perceeltarief", "perceeltarieven", perceeltariefCountCb);
 }
-async function fetchAllPercelen() {
-    // id, version, aftrek, belastbaar_inkomen, belastbaar_inkomen_gebouwd, geschrapt, grondgebruik, oppervlak, opvolgnrs, perceelnr, perceelnrtvg, plaatselijke_benaming, sat, toponiem, volgnr, volgnrtvg, artikel_id, oatscan_id, sectie_id, nok, perceelverwijzing_id, accepteer, geengebouw, impotbatch_id, importcontextnr
-    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceel", "perceel");
+async function fetchAllPercelen(perceelCountCb) {
+    // id, version, aftrek, belastbaar_inkomen, belastbaar_inkomen_gebouwd, geschrapt, grondgebruik, ...
+    return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceel", "perceel", "percelen", perceelCountCb);
 }
 
 function combineCategorie(cat, subcat) {
@@ -197,7 +227,6 @@ function aggregateData(
     tariefsoorten, categorieen, gemeenten, provincies,
     tarieven, perceeltarieven, percelen
 ) {
-    // Indexes for fast lookup
     const catMap = {};
     categorieen.forEach(cat => { catMap[String(cat.id)] = cat; });
     const gemeenteMap = {};
@@ -229,7 +258,7 @@ function aggregateData(
 
     // Aggregatie
     // key: provincie, gemeente, categorie, naam, grondgebruik
-    // waarde: {provincie, gemeente, categorie, naam, grondgebruik, perceelIds(Set), hasNoCat}
+    // waarde: {provincie, gemeente, categorie, naam, grondgebruik, perceelIds(Set), hasNoCat, hasPerceeltarief}
     const aggregation = {};
     for (const row of tariefsoorten) {
         // id, version, aantal, naam, type, gemeente_id, opmerking, categorie_id
@@ -278,7 +307,8 @@ function aggregateData(
                     naam: naam,
                     grondgebruik: "",
                     perceelIds: new Set(),
-                    hasNoCat: hasNoCat
+                    hasNoCat: hasNoCat,
+                    hasPerceeltarief: false
                 };
             }
         } else {
@@ -292,10 +322,12 @@ function aggregateData(
                         naam: naam,
                         grondgebruik: grondgebruik,
                         perceelIds: new Set(),
-                        hasNoCat: hasNoCat
+                        hasNoCat: hasNoCat,
+                        hasPerceeltarief: false
                     };
                 }
                 percelenSet.forEach(pid => aggregation[key].perceelIds.add(pid));
+                aggregation[key].hasPerceeltarief = true;
             }
         }
     }
@@ -306,67 +338,45 @@ function aggregateData(
         obj.naam,
         obj.grondgebruik,
         obj.perceelIds.size,
-        obj.hasNoCat
+        obj.hasNoCat,
+        obj.hasPerceeltarief
     ]);
-}
-
-// Correcte merge-functie: alleen de eerste cel tonen met rowspan, de rest leeg laten
-function mergeProvinceCells(table) {
-    let order = table.order();
-    let api = table.api ? table.api() : table;
-    let rows = api.rows({ page: 'current', search: 'applied' }).nodes();
-    // Eerst: reset alle cellen
-    $(rows).each(function(i, row) {
-        let cell = $('td', row).eq(0);
-        cell.show().attr('rowspan', 1);
-    });
-    // Alleen samenvoegen als gesorteerd op provincie (kolom 0)
-    if (order.length && order[0][0] === 0) {
-        let lastProv = null;
-        let rowspan = 1;
-        let firstCell = null;
-        $(rows).each(function(i, row) {
-            let cell = $('td', row).eq(0);
-            let prov = cell.text();
-            if (prov === lastProv) {
-                cell.hide();
-                rowspan++;
-                if (firstCell) {
-                    firstCell.attr('rowspan', rowspan);
-                }
-            } else {
-                lastProv = prov;
-                rowspan = 1;
-                firstCell = cell;
-                firstCell.attr('rowspan', 1);
-            }
-        });
-    }
 }
 
 $(async function() {
-    const [
-        tariefsoorten, categorieen, gemeenten, provincies,
-        tarieven, perceeltarieven, percelen
-    ] = await Promise.all([
-        fetchAllTariefsoorten(),
-        fetchTariefsoortcategorieen(),
-        fetchAllGemeenten(),
-        fetchProvincies(),
-        fetchAllTarieven(),
-        fetchAllPerceeltarieven(),
-        fetchAllPercelen()
-    ]);
+    let perceelCount = 0;
+    let perceeltariefCount = 0;
+    function updateStatusLoading() {
+        setStatus(`Laden... percelen: ${perceelCount}, perceeltarieven: ${perceeltariefCount}`);
+    }
+
+    setStatus("Laden tariefsoorten...");
+    const tariefsoorten = await fetchAllTariefsoorten();
+    const categorieen = await fetchTariefsoortcategorieen();
+    const gemeenten = await fetchAllGemeenten();
+    const provincies = await fetchProvincies();
+    const tarieven = await fetchAllTarieven();
+    const perceeltarieven = await fetchAllPerceeltarieven(count => {
+        perceeltariefCount = count;
+        updateStatusLoading();
+    });
+    const percelen = await fetchAllPercelen(count => {
+        perceelCount = count;
+        updateStatusLoading();
+    });
+
+    setStatus("Aggregatie van gegevens...");
     const data = aggregateData(
         tariefsoorten, categorieen, gemeenten, provincies,
         tarieven, perceeltarieven, percelen
     );
+    setStatus(`Gereed! Percelen: ${perceelCount}, perceeltarieven: ${perceeltariefCount}`);
 
+    // DataTables filter
     $.fn.dataTable.ext.search.push(function(settings, searchData, index, rowData, counter) {
-        if (window.filterNoCatActive) {
-            // Alleen rijen zonder categorie (categorie === "")
-            return rowData[2] === "";
-        }
+        if (window.filterNoCatActive && !rowData[2] === "") return false;
+        if (window.filterNoCatActive && rowData[2] !== "") return false;
+        if (window.filterPerceeltariefActive && !rowData[7]) return false;
         return true;
     });
 
@@ -392,37 +402,37 @@ $(async function() {
             url: "//cdn.datatables.net/plug-ins/1.13.7/i18n/nl-NL.json"
         },
         autoWidth: false,
-        scrollY: 'calc(100vh - 140px)',
+        scrollY: 'calc(100vh - 170px)',
         scrollCollapse: true,
         paging: true,
-        dom: '<"top"f>rt<"bottom"ip><"clear">',
-        drawCallback: function(settings) {
-            mergeProvinceCells(this);
-        }
+        dom: '<"top"f>rt<"bottom"ip><"clear">'
     });
 
-    // Voeg checkbox toe naast het zoekveld
+    // Voeg beide checkboxes toe naast het zoekveld
     let filterDiv = $('#tariefTable_filter');
     filterDiv.append(
-        `<label id="noCatFilterLabel">
-            <input type="checkbox" class="dt-checkbox" id="noCatFilter">
-            Alleen zonder categorie
-        </label>`
+        `<span class="filter-checkboxes">
+            <label>
+                <input type="checkbox" class="dt-checkbox" id="noCatFilter">
+                Alleen zonder categorie
+            </label>
+            <label>
+                <input type="checkbox" class="dt-checkbox" id="hasPerceeltariefFilter">
+                Alleen met perceeltarieven
+            </label>
+        </span>`
     );
 
     window.filterNoCatActive = false;
+    window.filterPerceeltariefActive = false;
     $('#noCatFilter').on('change', function() {
         window.filterNoCatActive = this.checked;
         table.draw();
     });
-
-    // Zorg dat provincie-cellen bij sorteren weer goed worden samengevoegd of teruggezet
-    table.on('order.dt search.dt page.dt', function() {
-        mergeProvinceCells(table);
+    $('#hasPerceeltariefFilter').on('change', function() {
+        window.filterPerceeltariefActive = this.checked;
+        table.draw();
     });
-
-    // Initieel ook uitvoeren
-    mergeProvinceCells(table);
 });
 </script>
 </body>
