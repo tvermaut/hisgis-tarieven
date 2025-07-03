@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <title>Tariefsoorten per Categorie en Naam</title>
+    <title>Tariefsoorten per Categorie, Gemeente en Provincie</title>
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
     <style>
         html, body {
@@ -73,7 +73,6 @@
             padding: 0 !important;
             margin: 0 !important;
         }
-        /* Reserveer ruimte voor paginering */
         .dataTables_wrapper .bottom {
             min-height: 48px;
             position: relative;
@@ -83,6 +82,9 @@
             align-items: center;
             justify-content: space-between;
         }
+        .cat-empty {
+            background-color: #ffeaea !important;
+        }
     </style>
 </head>
 <body>
@@ -91,10 +93,10 @@
         <table id="tariefTable" class="display" style="width:100%">
             <thead>
                 <tr>
-                    <th>Categorie-id</th>
+                    <th>Provincie</th>
+                    <th>Gemeente</th>
                     <th>Categorie</th>
                     <th>Tariefsoortnaam</th>
-                    <th>Gemeente</th>
                     <th>Aantal tariefsoorten</th>
                 </tr>
             </thead>
@@ -157,7 +159,22 @@ async function fetchAllGemeenten() {
     // id, version, code, kadastralecode, naam, oatmodel, uniekenaam, provincie_id, status, opmerking
     return allRows.map(r => ({
         id: r[0],
-        uniekenaam: r[6]
+        uniekenaam: r[6],
+        provincie_id: r[7]
+    }));
+}
+
+async function fetchProvincies() {
+    const url = "https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=provincie";
+    const response = await fetch(url);
+    const data = await response.json();
+    const rows = (data.provincie || [])
+        .filter(item => item.row)
+        .map(item => item.row);
+    // id, version, code, naam
+    return rows.map(r => ({
+        id: r[0],
+        naam: r[3]
     }));
 }
 
@@ -168,17 +185,22 @@ function combineCategorie(cat, subcat) {
     return "";
 }
 
-function aggregateByCategorieAndNaam(tariefsoorten, categorieen, gemeenten) {
+function aggregateData(tariefsoorten, categorieen, gemeenten, provincies) {
     // tariefsoort: id, version, aantal, naam, type, gemeente_id, opmerking, categorie_id
     // categorieen: id, categorie, subcategorie
-    // gemeenten: id, uniekenaam
+    // gemeenten: id, uniekenaam, provincie_id
+    // provincies: id, naam
     const catMap = {};
     for (const cat of categorieen) {
         catMap[String(cat.id)] = cat;
     }
     const gemeenteMap = {};
     for (const gem of gemeenten) {
-        gemeenteMap[String(gem.id)] = gem.uniekenaam;
+        gemeenteMap[String(gem.id)] = gem;
+    }
+    const provincieMap = {};
+    for (const prov of provincies) {
+        provincieMap[String(prov.id)] = prov.naam;
     }
     const aggregation = {};
     for (const row of tariefsoorten) {
@@ -190,44 +212,83 @@ function aggregateByCategorieAndNaam(tariefsoorten, categorieen, gemeenten) {
         const gemeente_id = row[5] !== undefined && row[5] !== null && row[5] !== "" ? String(row[5]) : null;
         let cat = categorie_id && catMap[categorie_id] ? catMap[categorie_id] : null;
         let catLabel = cat ? combineCategorie(cat.categorie, cat.subcategorie) : "";
-        let catIdDisplay = categorie_id ? categorie_id : "∅";
-        let gemeenteNaam = gemeente_id && gemeenteMap[gemeente_id] ? gemeenteMap[gemeente_id] : "";
-        let key = [catIdDisplay, catLabel, naam, gemeenteNaam].join('||');
+        let gemeente = gemeente_id && gemeenteMap[gemeente_id] ? gemeenteMap[gemeente_id] : null;
+        let gemeenteNaam = gemeente ? gemeente.uniekenaam : "";
+        let provincieNaam = (gemeente && gemeente.provincie_id && provincieMap[gemeente.provincie_id]) ? provincieMap[gemeente.provincie_id] : "";
+        let key = [provincieNaam, gemeenteNaam, catLabel, naam].join('||');
+        let hasNoCat = !categorie_id;
         if (!aggregation[key]) {
             aggregation[key] = {
-                categorie_id: catIdDisplay,
+                provincie: provincieNaam,
+                gemeente: gemeenteNaam,
                 categorie: catLabel,
                 naam: naam,
-                gemeente: gemeenteNaam,
                 count: 0,
-                hasNoCat: !categorie_id
+                hasNoCat: hasNoCat
             };
         }
         aggregation[key].count += 1;
     }
     return Object.values(aggregation).map(obj => [
-        obj.categorie_id,
+        obj.provincie,
+        obj.gemeente,
         obj.categorie,
         obj.naam,
-        obj.gemeente,
         obj.count,
         obj.hasNoCat // voor filter
     ]);
 }
 
+// Functie om provincie-cellen samen te voegen bij sortering op provincie
+function mergeProvinceCells(table) {
+    // Alleen doen als gesorteerd op provincie (kolom 0)
+    let order = table.order();
+    if (order.length && order[0][0] === 0) {
+        // Haal alle zichtbare rijen op
+        let api = table.api ? table.api() : table;
+        let rows = api.rows({ page: 'current', search: 'applied' }).nodes();
+        let lastProv = null;
+        let rowspan = 1;
+        let firstCell = null;
+        $(rows).each(function(i, row) {
+            let cell = $('td', row).eq(0);
+            let prov = cell.text();
+            if (prov === lastProv) {
+                $(cell).remove();
+                rowspan++;
+                if (firstCell) {
+                    firstCell.attr('rowspan', rowspan);
+                }
+            } else {
+                lastProv = prov;
+                rowspan = 1;
+                firstCell = cell;
+                firstCell.attr('rowspan', 1);
+            }
+        });
+    } else {
+        // Zorg dat alle provincie-cellen zichtbaar zijn (geen rowspan)
+        $('#tariefTable tbody tr').each(function() {
+            let cell = $(this).find('td').eq(0);
+            if (cell.length) cell.attr('rowspan', 1);
+        });
+    }
+}
+
 $(async function() {
-    const [tariefsoorten, categorieen, gemeenten] = await Promise.all([
+    const [tariefsoorten, categorieen, gemeenten, provincies] = await Promise.all([
         fetchAllTariefsoorten(),
         fetchTariefsoortcategorieen(),
-        fetchAllGemeenten()
+        fetchAllGemeenten(),
+        fetchProvincies()
     ]);
-    const data = aggregateByCategorieAndNaam(tariefsoorten, categorieen, gemeenten);
+    const data = aggregateData(tariefsoorten, categorieen, gemeenten, provincies);
 
     // Voeg de checkbox toe naast het zoekveld
     $.fn.dataTable.ext.search.push(function(settings, searchData, index, rowData, counter) {
         if (window.filterNoCatActive) {
-            // Laat alleen rijen zien zonder categorie (categorie-id === ∅)
-            return rowData[0] === "∅";
+            // Laat alleen rijen zien zonder categorie (categorie === "")
+            return rowData[2] === "";
         }
         return true;
     });
@@ -236,14 +297,20 @@ $(async function() {
     let table = $('#tariefTable').DataTable({
         data: data,
         columns: [
-            { title: "Categorie-id" },
-            { title: "Categorie" },
-            { title: "Tariefsoortnaam" },
+            { title: "Provincie" },
             { title: "Gemeente" },
+            { title: "Categorie",
+              createdCell: function(td, cellData, rowData, row, col) {
+                  if (!cellData || cellData === "") {
+                      $(td).addClass('cat-empty').html('∅');
+                  }
+              }
+            },
+            { title: "Tariefsoortnaam" },
             { title: "Aantal tariefsoorten", className: "dt-right" }
         ],
         pageLength: 100,
-        order: [[0, 'asc'], [2, 'asc']],
+        order: [[0, 'asc'], [1, 'asc']],
         language: {
             url: "//cdn.datatables.net/plug-ins/1.13.7/i18n/nl-NL.json"
         },
@@ -251,7 +318,10 @@ $(async function() {
         scrollY: 'calc(100vh - 140px)',
         scrollCollapse: true,
         paging: true,
-        dom: '<"top"f>rt<"bottom"ip><"clear">'
+        dom: '<"top"f>rt<"bottom"ip><"clear">',
+        drawCallback: function(settings) {
+            mergeProvinceCells(this);
+        }
     });
 
     // Voeg checkbox toe naast het zoekveld
@@ -267,6 +337,11 @@ $(async function() {
     $('#noCatFilter').on('change', function() {
         window.filterNoCatActive = this.checked;
         table.draw();
+    });
+
+    // Zorg dat provincie-cellen bij sorteren weer goed worden samengevoegd of teruggezet
+    table.on('order.dt search.dt page.dt', function() {
+        mergeProvinceCells(table);
     });
 });
 </script>
