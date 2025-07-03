@@ -32,6 +32,7 @@
             padding: 8px 12px;
             font-size: 13px;
             gap: 2em;
+            flex-wrap: wrap;
         }
         .airtablebar-block {
             background: #fff;
@@ -43,6 +44,10 @@
             flex-direction: column;
             gap: 7px;
             min-width: 170px;
+            max-width: 430px;
+            width: auto;
+            box-sizing: border-box;
+            word-break: break-word;
         }
         .airtablebar-block label {
             font-weight: 600;
@@ -53,6 +58,7 @@
             align-items: center;
             gap: 0.5em;
             margin-bottom: 0;
+            flex-wrap: wrap;
         }
         .airtablebar-remove {
             background: none;
@@ -76,16 +82,24 @@
             line-height: 1;
             padding: 0;
         }
-        .filter-checkboxes {
-            display: inline-block;
-            margin-left: 1em;
-            margin-top: 6px;
+        .checkbox-block {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 7px;
+            padding: 8px 14px 8px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            min-width: 170px;
+            max-width: 430px;
+            width: auto;
+            box-sizing: border-box;
         }
-        .filter-checkboxes label {
-            margin-right: 1.5em;
+        .checkbox-block label {
             font-weight: normal;
             font-size: 1em;
             vertical-align: middle;
+            margin-bottom: 2px;
         }
         .dt-checkbox {
             vertical-align: middle;
@@ -131,7 +145,6 @@
         .cat-empty {
             background-color: #ffeaea !important;
         }
-        /* Compacte rijen */
         table.airtable-table tbody tr {
             height: 24px;
         }
@@ -222,7 +235,7 @@
             <div id="filter-rows"></div>
             <button class="airtablebar-add" id="filter-add" title="Filter toevoegen">+ Filter</button>
         </div>
-        <span class="filter-checkboxes">
+        <div class="checkbox-block" id="checkbox-block">
             <label>
                 <input type="checkbox" class="dt-checkbox" id="noCatFilter">
                 Alleen zonder categorie
@@ -231,7 +244,7 @@
                 <input type="checkbox" class="dt-checkbox" id="hasPerceeltariefFilter">
                 Alleen met perceeltarieven
             </label>
-        </span>
+        </div>
     </div>
     <div id="table-area" style="flex: 1 1 auto; min-height:0; min-width:0; overflow:auto;">
         <div class="airtable-table-wrapper" style="height: calc(100vh - 170px);">
@@ -278,12 +291,11 @@ function sortDirDropdown(selectedDir) {
 function filterInput(selectedVal) {
     return `<input type="text" class="airtable-dropdown" name="filterwaarde" placeholder="waarde..." style="width: 120px;" value="${selectedVal||""}">`;
 }
-// --- UI state ---
 let groupbyFields = ["provincie"];
 let sortbyFields = [{field: "provincie", dir: "asc"}];
 let filterFields = [];
+let checkboxState = {noCat: false, hasPerceeltarief: false};
 function updateBar() {
-    // Groepeer
     let $g = $("#groupby-rows").empty();
     groupbyFields.forEach((f, i) => {
         $g.append(`<div class="airtablebar-row">
@@ -291,7 +303,6 @@ function updateBar() {
             ${groupbyFields.length>1?'<button class="airtablebar-remove" data-idx="'+i+'" data-type="groupby" title="Verwijder groepering">&times;</button>':''}
         </div>`);
     });
-    // Sorteren
     let $s = $("#sortby-rows").empty();
     sortbyFields.forEach((s, i) => {
         $s.append(`<div class="airtablebar-row">
@@ -300,7 +311,6 @@ function updateBar() {
             ${sortbyFields.length>1?'<button class="airtablebar-remove" data-idx="'+i+'" data-type="sortby" title="Verwijder sortering">&times;</button>':''}
         </div>`);
     });
-    // Filter
     let $f = $("#filter-rows").empty();
     filterFields.forEach((f, i) => {
         $f.append(`<div class="airtablebar-row">
@@ -309,10 +319,12 @@ function updateBar() {
             <button class="airtablebar-remove" data-idx="${i}" data-type="filter" title="Verwijder filter">&times;</button>
         </div>`);
     });
-    // Add-knoppen tonen/verbergen
     $("#groupby-add").toggle(groupbyFields.length<3);
     $("#sortby-add").toggle(sortbyFields.length<3);
     $("#filter-add").toggle(filterFields.length<3);
+    // Checkboxes
+    $("#noCatFilter").prop("checked", checkboxState.noCat);
+    $("#hasPerceeltariefFilter").prop("checked", checkboxState.hasPerceeltarief);
 }
 function getColIdx(field) {
     return {
@@ -327,7 +339,35 @@ function getColIdx(field) {
 function setStatus(msg) {
     document.getElementById('statusbar').textContent = msg;
 }
-// --- Data ophalen ---
+function encodeStateToUrl() {
+    const params = new URLSearchParams();
+    if (groupbyFields.length) params.set('group', groupbyFields.join(','));
+    if (sortbyFields.length) params.set('sort', sortbyFields.map(s=>s.field+':'+s.dir).join(','));
+    if (filterFields.length) params.set('filter', filterFields.map(f=>f.field+':'+encodeURIComponent(f.waarde||"")).join(','));
+    if ($("#noCatFilter").prop("checked")) params.set('noCat', '1');
+    if ($("#hasPerceeltariefFilter").prop("checked")) params.set('hasPerceeltarief', '1');
+    const url = window.location.pathname + '?' + params.toString();
+    history.replaceState(null, '', url);
+}
+function decodeStateFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    groupbyFields = params.get('group') ? params.get('group').split(',').filter(Boolean) : ["provincie"];
+    sortbyFields = params.get('sort')
+        ? params.get('sort').split(',').filter(Boolean).map(s => {
+            const [field, dir] = s.split(':');
+            return {field, dir: dir||"asc"};
+        })
+        : [{field: "provincie", dir: "asc"}];
+    filterFields = params.get('filter')
+        ? params.get('filter').split(',').filter(Boolean).map(f => {
+            const [field, ...rest] = f.split(':');
+            return {field, waarde: decodeURIComponent(rest.join(':')||"")};
+        })
+        : [];
+    checkboxState.noCat = params.get('noCat') === '1';
+    checkboxState.hasPerceeltarief = params.get('hasPerceeltarief') === '1';
+}
+// ---- FETCH FUNCTIES ----
 async function fetchWithRetry(url, label, maxTries = 5) {
     let tries = 0;
     let delays = [0, 1000, 3000, 10000];
@@ -355,7 +395,7 @@ async function fetchPaged(url, key, statusLabel, countCb) {
     let offset = 0;
     const limit = 1000;
     while (true) {
-        setStatus(`Laden ${statusLabel}... (${allRows.length} percelen, perceeltarieven worden apart geteld)`);
+        setStatus(`Laden ${statusLabel}... (${allRows.length} geladen)`);
         let data;
         try {
             data = await fetchWithRetry(url + "&offset=" + offset, statusLabel);
@@ -413,6 +453,7 @@ async function fetchAllPerceeltarieven(perceeltariefCountCb) {
 async function fetchAllPercelen(perceelCountCb) {
     return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceel", "perceel", "percelen", perceelCountCb);
 }
+// ---- EINDE FETCH FUNCTIES ----
 function combineCategorie(cat, subcat) {
     if (cat && subcat) return cat + ": " + subcat;
     if (cat) return cat;
@@ -445,9 +486,6 @@ function aggregateData(
     percelen.forEach(perceel => {
         perceelId2grondgebruik[String(perceel[0])] = perceel[6];
     });
-    // Aggregatie: per combinatie alle unieke perceel-ids verzamelen
-    // key: provincie, gemeente, categorie, naam, grondgebruik
-    // waarde: {provincie, gemeente, categorie, naam, grondgebruik, perceelIds(Set), hasNoCat, hasPerceeltarief}
     const aggregation = {};
     for (const row of tariefsoorten) {
         const id = String(row[0]);
@@ -512,7 +550,6 @@ function aggregateData(
             }
         }
     }
-    // Zet om naar array
     return Object.values(aggregation).map(obj => [
         obj.provincie,
         obj.gemeente,
@@ -525,18 +562,15 @@ function aggregateData(
     ]);
 }
 function renderAirtableTable(data, perceelCount, perceeltariefCount) {
-    // --- Groeperen, sorteren, filteren (meervoudig) ---
-    // 1. Filter
     let filtered = data.filter(row => {
         for (let f of filterFields) {
             let idx = getColIdx(f.field);
             if (!((row[idx]||"").toString().toLowerCase().includes((f.waarde||"").toLowerCase()))) return false;
         }
-        if ($('#noCatFilter').prop('checked') && row[2] !== "") return false;
-        if ($('#hasPerceeltariefFilter').prop('checked') && !row[7]) return false;
+        if ($("#noCatFilter").prop("checked") && row[2] !== "") return false;
+        if ($("#hasPerceeltariefFilter").prop("checked") && !row[7]) return false;
         return true;
     });
-    // 2. Sorteren
     if (sortbyFields.length) {
         filtered.sort((a,b) => {
             for (let s of sortbyFields) {
@@ -549,7 +583,6 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
             return 0;
         });
     }
-    // 3. Groeperen (meervoudig, recursief)
     function groupRows(rows, groupFields, depth=0) {
         if (!groupFields.length) return rows;
         let idx = getColIdx(groupFields[0]);
@@ -569,7 +602,6 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
         }
         return groups;
     }
-    // Kolommen die niet getoond moeten worden
     let hiddenCols = new Set(groupbyFields);
     function renderTableRows(rows) {
         let html = "";
@@ -623,7 +655,6 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
     }
     $('#airtable-table-root').html(html);
     setStatus(`Gereed! Percelen: ${perceelCount}, perceeltarieven: ${perceeltariefCount}`);
-
     // Toggle-groepen
     $('.group-header .toggle').off().on('click', function(e) {
         let groupId = $(this).data('groupid');
@@ -641,73 +672,72 @@ function renderAirtableTable(data, perceelCount, perceeltariefCount) {
     });
 }
 function attachBarEvents(data, perceelCount, perceeltariefCount) {
-    // Groepeer
     $('#groupby-add').off().on('click', function() {
         let used = new Set(groupbyFields);
         let next = FIELD_OPTIONS.map(f=>f.value).find(v=>!used.has(v) && v!=="percelen");
         if (next) groupbyFields.push(next);
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount);
+        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#groupby-rows').on('change', 'select[name=groupby]', function() {
         let idx = $(this).parent().index();
         groupbyFields[idx] = $(this).val();
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount);
+        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#groupby-rows').on('click', '.airtablebar-remove', function() {
         let idx = parseInt($(this).data('idx'),10);
         groupbyFields.splice(idx,1);
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount);
+        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
-    // Sorteren
     $('#sortby-add').off().on('click', function() {
         let used = new Set(sortbyFields.map(s=>s.field));
         let next = FIELD_OPTIONS.map(f=>f.value).find(v=>!used.has(v));
         if (next) sortbyFields.push({field: next, dir: "asc"});
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount);
+        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#sortby-rows').on('change', 'select[name=sortby]', function() {
         let idx = $(this).parent().index();
         sortbyFields[idx].field = $(this).val();
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount);
+        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#sortby-rows').on('change', 'select[name=sortdir]', function() {
         let idx = $(this).parent().index();
         sortbyFields[idx].dir = $(this).val();
-        renderAirtableTable(data, perceelCount, perceeltariefCount);
+        renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#sortby-rows').on('click', '.airtablebar-remove', function() {
         let idx = parseInt($(this).data('idx'),10);
         sortbyFields.splice(idx,1);
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount);
+        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
-    // Filter
     $('#filter-add').off().on('click', function() {
         let used = new Set(filterFields.map(f=>f.field));
         let next = FIELD_OPTIONS.map(f=>f.value).find(v=>!used.has(v));
         if (next) filterFields.push({field: next, waarde: ""});
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount);
+        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#filter-rows').on('change', 'select[name=filterveld]', function() {
         let idx = $(this).parent().index();
         filterFields[idx].field = $(this).val();
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount);
+        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#filter-rows').on('input', 'input[name=filterwaarde]', function() {
         let idx = $(this).parent().index();
         filterFields[idx].waarde = $(this).val();
-        renderAirtableTable(data, perceelCount, perceeltariefCount);
+        renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
     $('#filter-rows').on('click', '.airtablebar-remove', function() {
         let idx = parseInt($(this).data('idx'),10);
         filterFields.splice(idx,1);
-        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount);
+        updateBar(); renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
-    // Checkboxes
     $('#noCatFilter,#hasPerceeltariefFilter').on('change', function() {
-        renderAirtableTable(data, perceelCount, perceeltariefCount);
+        checkboxState.noCat = $("#noCatFilter").prop("checked");
+        checkboxState.hasPerceeltarief = $("#hasPerceeltariefFilter").prop("checked");
+        renderAirtableTable(data, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
 }
 $(async function() {
+    decodeStateFromUrl();
     let perceelCount = 0;
     let perceeltariefCount = 0;
     function updateStatusLoading() {
@@ -727,7 +757,7 @@ $(async function() {
         perceelCount = count;
         updateStatusLoading();
     });
-    setStatus("Aggregatie van gegevens...");
+    setStatus(`Aggregatie van gegevens...`);
     const data = aggregateData(
         tariefsoorten, categorieen, gemeenten, provincies,
         tarieven, perceeltarieven, percelen
