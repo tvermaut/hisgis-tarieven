@@ -133,7 +133,6 @@
         }
         table.airtable-table th,
         table.airtable-table td {
-            width: 16.66%;
             padding: 2px 6px;
             box-sizing: border-box;
             border-right: 1px solid #ececec;
@@ -177,7 +176,6 @@
             padding: 2px 6px;
             margin-right: 0.5em;
         }
-        /* Airtable group-box styling */
         .group-box {
             border-radius: 7px;
             border: 1.5px solid #e0e0e0;
@@ -248,18 +246,6 @@
     </div>
     <div id="table-area" style="flex: 1 1 auto; min-height:0; min-width:0; overflow:auto;">
         <div class="airtable-table-wrapper" style="height: calc(100vh - 170px);">
-            <table class="airtable-table" id="airtable-table-head">
-                <thead>
-                    <tr>
-                        <th>Provincie</th>
-                        <th>Gemeente</th>
-                        <th>Categorie</th>
-                        <th>Tariefsoortnaam</th>
-                        <th>Grondgebruik</th>
-                        <th class="right">Aantal percelen</th>
-                    </tr>
-                </thead>
-            </table>
             <div id="airtable-table-root"></div>
         </div>
     </div>
@@ -272,12 +258,11 @@ const FIELD_OPTIONS = [
     {value: "gemeente", label: "Gemeente"},
     {value: "categorie", label: "Categorie"},
     {value: "naam", label: "Tariefsoortnaam"},
-    {value: "grondgebruik", label: "Grondgebruik"},
-    {value: "percelen", label: "Aantal percelen"}
+    {value: "grondgebruik", label: "Grondgebruik"}
 ];
-function fieldDropdown(name, selected, allowPercelen=false) {
+function fieldDropdown(name, selected) {
     return `<select class="airtable-dropdown" name="${name}">
-        ${FIELD_OPTIONS.filter(f => allowPercelen || f.value !== "percelen").map(f =>
+        ${FIELD_OPTIONS.map(f =>
             `<option value="${f.value}"${f.value===selected?' selected':''}>${f.label}</option>`
         ).join("")}
     </select>`;
@@ -306,7 +291,7 @@ function updateBar() {
     let $s = $("#sortby-rows").empty();
     sortbyFields.forEach((s, i) => {
         $s.append(`<div class="airtablebar-row">
-            ${fieldDropdown("sortby", s.field, true)}
+            ${fieldDropdown("sortby", s.field)}
             ${sortDirDropdown(s.dir)}
             ${sortbyFields.length>1?'<button class="airtablebar-remove" data-idx="'+i+'" data-type="sortby" title="Verwijder sortering">&times;</button>':''}
         </div>`);
@@ -314,7 +299,7 @@ function updateBar() {
     let $f = $("#filter-rows").empty();
     filterFields.forEach((f, i) => {
         $f.append(`<div class="airtablebar-row">
-            ${fieldDropdown("filterveld", f.field, true)}
+            ${fieldDropdown("filterveld", f.field)}
             ${filterInput(f.waarde)}
             <button class="airtablebar-remove" data-idx="${i}" data-type="filter" title="Verwijder filter">&times;</button>
         </div>`);
@@ -324,16 +309,6 @@ function updateBar() {
     $("#filter-add").toggle(filterFields.length<3);
     $("#noCatFilter").prop("checked", checkboxState.noCat);
     $("#hasPerceeltariefFilter").prop("checked", checkboxState.hasPerceeltarief);
-}
-function getColIdx(field) {
-    return {
-        provincie: 0,
-        gemeente: 1,
-        categorie: 2,
-        naam: 3,
-        grondgebruik: 4,
-        percelen: 5
-    }[field];
 }
 function setStatus(msg) {
     document.getElementById('statusbar').textContent = msg;
@@ -366,7 +341,12 @@ function decodeStateFromUrl() {
     checkboxState.noCat = params.get('noCat') === '1';
     checkboxState.hasPerceeltarief = params.get('hasPerceeltarief') === '1';
 }
-// ---- FETCH FUNCTIES ----
+function combineCategorie(cat, subcat) {
+    if (cat && subcat) return cat + ": " + subcat;
+    if (cat) return cat;
+    if (subcat) return subcat;
+    return "";
+}
 async function fetchWithRetry(url, label, maxTries = 5) {
     let tries = 0;
     let delays = [0, 1000, 3000, 10000];
@@ -452,19 +432,12 @@ async function fetchAllPerceeltarieven(perceeltariefCountCb) {
 async function fetchAllPercelen(perceelCountCb) {
     return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceel", "perceel", "percelen", perceelCountCb);
 }
-// ---- EINDE FETCH FUNCTIES ----
-function combineCategorie(cat, subcat) {
-    if (cat && subcat) return cat + ": " + subcat;
-    if (cat) return cat;
-    if (subcat) return subcat;
-    return "";
-}
 function aggregateDataDynamic(
     tariefsoorten, categorieen, gemeenten, provincies,
     tarieven, perceeltarieven, percelen,
     groupbyFields
 ) {
-    // Indexes
+    // Indexen
     const catMap = {};
     categorieen.forEach(cat => { catMap[String(cat.id)] = cat; });
     const gemeenteMap = {};
@@ -512,94 +485,89 @@ function aggregateDataDynamic(
                 }
             }
         }
-        // Perceel grondgebruik
         let perceelGrondgebruik = {};
         for (const perceelId of perceelIds) {
             perceelGrondgebruik[perceelId] = perceelId2grondgebruik[perceelId] || "";
         }
-        // Voor elk perceel, push een rij met alle mogelijke velden
         if (perceelIds.length === 0) {
-            rows.push([
-                provincieNaam,
-                gemeenteNaam,
-                catLabel,
-                naam,
-                "",
-                null, // perceelId
+            rows.push({
+                provincie: provincieNaam,
+                gemeente: gemeenteNaam,
+                categorie: catLabel,
+                naam: naam,
+                grondgebruik: "",
+                perceelId: null,
                 hasNoCat,
-                false // hasPerceeltarief
-            ]);
+                hasPerceeltarief: false
+            });
         } else {
             let perceelSet = new Set();
             for (const perceelId of perceelIds) {
-                if (perceelSet.has(perceelId)) continue; // uniek per tariefsoort
+                if (perceelSet.has(perceelId)) continue;
                 perceelSet.add(perceelId);
-                rows.push([
-                    provincieNaam,
-                    gemeenteNaam,
-                    catLabel,
-                    naam,
-                    perceelGrondgebruik[perceelId] || "",
+                rows.push({
+                    provincie: provincieNaam,
+                    gemeente: gemeenteNaam,
+                    categorie: catLabel,
+                    naam: naam,
+                    grondgebruik: perceelGrondgebruik[perceelId] || "",
                     perceelId,
                     hasNoCat,
-                    true
-                ]);
+                    hasPerceeltarief: true
+                });
             }
         }
     }
-    // Dynamische aggregatie op groupbyFields
-    let idxs = groupbyFields.map(getColIdx);
+    // Dynamisch aggregeren op groupbyFields
     let agg = {};
     for (const row of rows) {
-        // key is de geselecteerde groupby-velden
-        let key = idxs.map(i => row[i] || "").join("||");
+        let key = groupbyFields.map(f => row[f] || "").join("||");
         if (!agg[key]) {
-            // Vul alle velden in, behalve "Aantal percelen" (die komt straks)
-            let base = [];
-            for (let i=0; i<6; ++i) {
-                if (i === 5) base[i] = 0; // aantal percelen
-                else base[i] = row[i];
-            }
-            base[6] = row[6]; // hasNoCat
-            base[7] = row[7]; // hasPerceeltarief
-            base.perceelSet = new Set();
-            agg[key] = base;
+            agg[key] = {
+                groupVals: groupbyFields.map(f => row[f] || ""),
+                perceelSet: new Set(),
+                hasNoCat: false,
+                hasPerceeltarief: false
+            };
         }
-        if (row[5]) agg[key].perceelSet.add(row[5]);
-        if (row[7]) agg[key][7] = true;
+        if (row.perceelId) agg[key].perceelSet.add(row.perceelId);
+        if (row.hasNoCat) agg[key].hasNoCat = true;
+        if (row.hasPerceeltarief) agg[key].hasPerceeltarief = true;
     }
-    // Zet om naar array, tel aantal unieke percelen
+    // Zet om naar array
     let out = [];
     for (let k in agg) {
-        let base = agg[k];
-        base[5] = base.perceelSet.size;
-        delete base.perceelSet;
-        out.push(base);
+        let a = agg[k];
+        out.push([
+            ...a.groupVals,
+            a.perceelSet.size,
+            a.hasNoCat,
+            a.hasPerceeltarief
+        ]);
     }
     return out;
 }
 function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
-    // Dynamisch aggregeren op groupbyFields
     let data = aggregateDataDynamic(
         dataRaw.tariefsoorten, dataRaw.categorieen, dataRaw.gemeenten, dataRaw.provincies,
         dataRaw.tarieven, dataRaw.perceeltarieven, dataRaw.percelen,
         groupbyFields
     );
-    // Filter
     let filtered = data.filter(row => {
         for (let f of filterFields) {
-            let idx = getColIdx(f.field);
+            let idx = groupbyFields.indexOf(f.field);
+            if (idx === -1) continue; // niet in kolommen
             if (!((row[idx]||"").toString().toLowerCase().includes((f.waarde||"").toLowerCase()))) return false;
         }
-        if ($("#noCatFilter").prop("checked") && row[2] !== "") return false;
-        if ($("#hasPerceeltariefFilter").prop("checked") && !row[7]) return false;
+        if ($("#noCatFilter").prop("checked") && !row[groupbyFields.length+1]) return false;
+        if ($("#hasPerceeltariefFilter").prop("checked") && !row[groupbyFields.length+2]) return false;
         return true;
     });
-    // Sorteren
     if (sortbyFields.length) {
         filtered.sort((a,b) => {
             for (let s of sortbyFields) {
-                let idx = getColIdx(s.field);
+                let idx = groupbyFields.indexOf(s.field);
+                if (idx === -1) continue;
                 let va = a[idx] || "";
                 let vb = b[idx] || "";
                 let cmp = va.localeCompare(vb, undefined, {numeric:true});
@@ -608,99 +576,41 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
             return 0;
         });
     }
-    // Groeperen (meervoudig, recursief)
-    function groupRows(rows, groupFields, depth=0) {
-        if (!groupFields.length) return rows;
-        let idx = getColIdx(groupFields[0]);
-        let groups = [];
-        let lastVal = null, curGroup = null;
-        rows.forEach(row => {
-            let val = row[idx] || "";
-            if (curGroup && curGroup.value === val) {
-                curGroup.rows.push(row);
-            } else {
-                curGroup = {value: val, rows: [row], collapsed: false, id: Math.random().toString(36).substr(2,8)};
-                groups.push(curGroup);
+    // Kolomkoppen
+    let headers = groupbyFields.map(f => {
+        let fo = FIELD_OPTIONS.find(x=>x.value===f);
+        return fo ? fo.label : f;
+    });
+    headers.push('Aantal percelen');
+    let html = `<table class="airtable-table"><thead><tr>`;
+    for (let i=0; i<headers.length; ++i) {
+        let cls = (i===headers.length-1) ? 'right' : '';
+        html += `<th class="${cls}">${headers[i]}</th>`;
+    }
+    html += `</tr></thead><tbody>`;
+    for (const row of filtered) {
+        html += "<tr>";
+        for (let i=0; i<groupbyFields.length; ++i) {
+            let val = row[i];
+            let field = groupbyFields[i];
+            let cls = "";
+            if (field==="categorie" && (!val || val === "")) {
+                cls = "cat-empty";
+                val = "∅";
             }
-        });
-        if (groupFields.length > 1) {
-            groups.forEach(g => g.rows = groupRows(g.rows, groupFields.slice(1), depth+1));
+            html += `<td class="${cls}">${val !== undefined && val !== null ? val : ""}</td>`;
         }
-        return groups;
+        html += `<td class="right">${row[groupbyFields.length]}</td>`;
+        html += "</tr>";
     }
-    let hiddenCols = new Set(groupbyFields);
-    function renderTableRows(rows) {
-        let html = "";
-        for (const row of rows) {
-            html += "<tr>";
-            for (let i=0; i<6; ++i) {
-                let field = FIELD_OPTIONS[i].value;
-                if (hiddenCols.has(field)) continue;
-                let val = row[i];
-                let cls = "";
-                if (i === 2 && (!val || val === "")) {
-                    cls = "cat-empty";
-                    val = "∅";
-                }
-                if (i === 5) cls += " right";
-                html += `<td class="${cls}">${val !== undefined && val !== null ? val : ""}</td>`;
-            }
-            html += "</tr>";
-        }
-        return html;
-    }
-    function renderGroups(groups, groupFields, depth=0) {
-        let html = "";
-        let field = groupFields[0];
-        for (const group of groups) {
-            let groupId = group.id;
-            let collapsed = group.collapsed;
-            html += `<div class="group-box" data-groupid="${groupId}" style="margin-left:${depth*24}px">`;
-            html += `<div class="group-header" data-groupid="${groupId}">
-                <span>${FIELD_OPTIONS.find(f=>f.value===field).label}: ${group.value || "(leeg)"}</span>
-                <span class="toggle" data-groupid="${groupId}" title="Groep ${collapsed?'openen':'sluiten'}">${collapsed?'&#9654;':'&#9660;'}</span>
-            </div>`;
-            html += `<div class="group-content" style="display:${collapsed?'none':'block'}">`;
-            if (Array.isArray(group.rows) && groupFields.length>1 && group.rows.length && typeof group.rows[0] === "object" && group.rows[0].rows) {
-                html += renderGroups(group.rows, groupFields.slice(1), depth+1);
-            } else {
-                html += `<table class="airtable-table"><tbody>`;
-                html += renderTableRows(group.rows);
-                html += `</tbody></table>`;
-            }
-            html += `</div></div>`;
-        }
-        return html;
-    }
-    let html = "";
-    if (groupbyFields.length) {
-        let groups = groupRows(filtered, groupbyFields);
-        html = renderGroups(groups, groupbyFields);
-    } else {
-        html = `<table class="airtable-table"><tbody>` + renderTableRows(filtered) + `</tbody></table>`;
-    }
+    html += "</tbody></table>";
     $('#airtable-table-root').html(html);
     setStatus(`Gereed! Percelen: ${perceelCount}, perceeltarieven: ${perceeltariefCount}`);
-    // Toggle-groepen
-    $('.group-header .toggle').off().on('click', function(e) {
-        let groupId = $(this).data('groupid');
-        let $box = $(`.group-box[data-groupid="${groupId}"]`);
-        let $content = $box.find('>.group-content');
-        let $icon = $box.find('.group-header .toggle');
-        if ($content.is(':visible')) {
-            $content.slideUp(120);
-            $icon.html('&#9654;').attr('title','Groep openen');
-        } else {
-            $content.slideDown(120);
-            $icon.html('&#9660;').attr('title','Groep sluiten');
-        }
-        e.stopPropagation();
-    });
 }
 function attachBarEvents(dataRaw, perceelCount, perceeltariefCount) {
     $('#groupby-add').off().on('click', function() {
         let used = new Set(groupbyFields);
-        let next = FIELD_OPTIONS.map(f=>f.value).find(v=>!used.has(v) && v!=="percelen");
+        let next = FIELD_OPTIONS.map(f=>f.value).find(v=>!used.has(v));
         if (next) groupbyFields.push(next);
         updateBar(); renderAirtableTable(dataRaw, perceelCount, perceeltariefCount); encodeStateToUrl();
     });
