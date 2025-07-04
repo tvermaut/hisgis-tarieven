@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <title>Dynamische Airtable-groepering</title>
+    <title>Dynamische Airtable-groepering (zonder aggregatie)</title>
     <style>
         html, body { height: 100%; margin: 0; padding: 0; }
         body { height: 100vh; width: 100vw; overflow: hidden; background: #fff; }
@@ -273,10 +273,9 @@ async function fetchAllPerceeltarieven(perceeltariefCountCb) {
 async function fetchAllPercelen(perceelCountCb) {
     return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceel", "perceel", "percelen", perceelCountCb);
 }
-function aggregateDataDynamic(
+function prepareRows(
     tariefsoorten, categorieen, gemeenten, provincies,
-    tarieven, perceeltarieven, percelen,
-    groupbyFields
+    tarieven, perceeltarieven, percelen
 ) {
     // Indexen
     const catMap = {};
@@ -301,7 +300,6 @@ function aggregateDataDynamic(
     percelen.forEach(perceel => {
         perceelId2grondgebruik[String(perceel[0])] = perceel[6];
     });
-    // Verzamel alle rijen met hun eigenschappen
     let rows = [];
     for (const row of tariefsoorten) {
         const id = String(row[0]);
@@ -359,59 +357,28 @@ function aggregateDataDynamic(
             }
         }
     }
-    // Dynamisch aggregeren op groupbyFields
-    let agg = {};
-    for (const row of rows) {
-        let key = groupbyFields.map(f => row[f] || "").join("||");
-        if (!agg[key]) {
-            agg[key] = {
-                groupVals: groupbyFields.map(f => row[f] || ""),
-                perceelSet: new Set(),
-                hasNoCat: false,
-                hasPerceeltarief: false
-            };
-        }
-        if (row.perceelId) agg[key].perceelSet.add(row.perceelId);
-        if (row.hasNoCat) agg[key].hasNoCat = true;
-        if (row.hasPerceeltarief) agg[key].hasPerceeltarief = true;
-    }
-    // Zet om naar array
-    let out = [];
-    for (let k in agg) {
-        let a = agg[k];
-        out.push({
-            groupVals: a.groupVals,
-            aantalPercelen: a.perceelSet.size,
-            hasNoCat: a.hasNoCat,
-            hasPerceeltarief: a.hasPerceeltarief
-        });
-    }
-    return out;
+    return rows;
 }
 function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
-    let data = aggregateDataDynamic(
+    let rows = prepareRows(
         dataRaw.tariefsoorten, dataRaw.categorieen, dataRaw.gemeenten, dataRaw.provincies,
-        dataRaw.tarieven, dataRaw.perceeltarieven, dataRaw.percelen,
-        groupbyFields
+        dataRaw.tarieven, dataRaw.perceeltarieven, dataRaw.percelen
     );
-    // Filter en sorteren
-    let filtered = data.filter(row => {
+    // Filter
+    let filtered = rows.filter(row => {
         for (let f of filterFields) {
-            let idx = groupbyFields.indexOf(f.field);
-            if (idx === -1) continue;
-            if (!((row.groupVals[idx]||"").toString().toLowerCase().includes((f.waarde||"").toLowerCase()))) return false;
+            if (!((row[f.field]||"").toString().toLowerCase().includes((f.waarde||"").toLowerCase()))) return false;
         }
         if ($("#noCatFilter").prop("checked") && !row.hasNoCat) return false;
         if ($("#hasPerceeltariefFilter").prop("checked") && !row.hasPerceeltarief) return false;
         return true;
     });
+    // Sorteren
     if (sortbyFields.length) {
         filtered.sort((a,b) => {
             for (let s of sortbyFields) {
-                let idx = groupbyFields.indexOf(s.field);
-                if (idx === -1) continue;
-                let va = a.groupVals[idx] || "";
-                let vb = b.groupVals[idx] || "";
+                let va = (a[s.field]||"");
+                let vb = (b[s.field]||"");
                 let cmp = va.localeCompare(vb, undefined, {numeric:true});
                 if (cmp !== 0) return s.dir === "asc" ? cmp : -cmp;
             }
@@ -421,27 +388,17 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
     // Recursief groeperen
     function groupRows(rows, groupFields, depth=0) {
         if (!groupFields.length) return rows;
-        let idx = 0;
+        let idx = groupFields[0];
         let groups = [];
         let lastVal = null, curGroup = null;
         rows.forEach(row => {
-            let val = row.groupVals[idx] || "";
+            let val = row[idx] || "";
             if (curGroup && curGroup.value === val) {
-                curGroup.rows.push({
-                    groupVals: row.groupVals.slice(1),
-                    aantalPercelen: row.aantalPercelen,
-                    hasNoCat: row.hasNoCat,
-                    hasPerceeltarief: row.hasPerceeltarief
-                });
+                curGroup.rows.push(row);
             } else {
                 curGroup = {
                     value: val,
-                    rows: [{
-                        groupVals: row.groupVals.slice(1),
-                        aantalPercelen: row.aantalPercelen,
-                        hasNoCat: row.hasNoCat,
-                        hasPerceeltarief: row.hasPerceeltarief
-                    }],
+                    rows: [row],
                     collapsed: false,
                     id: Math.random().toString(36).substr(2,8)
                 };
@@ -469,10 +426,24 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
             if (groupFields.length > 1) {
                 html += renderGroup(group.rows, groupFields.slice(1), depth+1);
             } else {
-                // Render tabel met alleen "Aantal percelen"
-                html += `<table class="airtable-table"><thead><tr><th class="right">Aantal percelen</th></tr></thead><tbody>`;
+                // Render volledige tabel met alle kolommen
+                html += `<table class="airtable-table"><thead><tr>`;
+                for (let fo of FIELD_OPTIONS) {
+                    html += `<th>${fo.label}</th>`;
+                }
+                html += `</tr></thead><tbody>`;
                 for (const row of group.rows) {
-                    html += `<tr><td class="right">${row.aantalPercelen}</td></tr>`;
+                    html += "<tr>";
+                    for (let fo of FIELD_OPTIONS) {
+                        let val = row[fo.value];
+                        let cls = "";
+                        if (fo.value==="categorie" && (!val || val === "")) {
+                            cls = "cat-empty";
+                            val = "∅";
+                        }
+                        html += `<td class="${cls}">${val !== undefined && val !== null ? val : ""}</td>`;
+                    }
+                    html += "</tr>";
                 }
                 html += `</tbody></table>`;
             }
@@ -480,36 +451,27 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
         }
         return html;
     }
-    // Kolomkoppen
-    let headers = groupbyFields.map(f => {
-        let fo = FIELD_OPTIONS.find(x=>x.value===f);
-        return fo ? fo.label : f;
-    });
-    headers.push('Aantal percelen');
     let html = "";
     if (groupbyFields.length) {
         let groups = groupRows(filtered, groupbyFields);
         html = renderGroup(groups, groupbyFields);
     } else {
         html = `<table class="airtable-table"><thead><tr>`;
-        for (let i=0; i<headers.length; ++i) {
-            let cls = (i===headers.length-1) ? 'right' : '';
-            html += `<th class="${cls}">${headers[i]}</th>`;
+        for (let fo of FIELD_OPTIONS) {
+            html += `<th>${fo.label}</th>`;
         }
         html += `</tr></thead><tbody>`;
         for (const row of filtered) {
             html += "<tr>";
-            for (let i=0; i<groupbyFields.length; ++i) {
-                let val = row.groupVals[i];
-                let field = groupbyFields[i];
+            for (let fo of FIELD_OPTIONS) {
+                let val = row[fo.value];
                 let cls = "";
-                if (field==="categorie" && (!val || val === "")) {
+                if (fo.value==="categorie" && (!val || val === "")) {
                     cls = "cat-empty";
                     val = "∅";
                 }
                 html += `<td class="${cls}">${val !== undefined && val !== null ? val : ""}</td>`;
             }
-            html += `<td class="right">${row.aantalPercelen}</td>`;
             html += "</tr>";
         }
         html += "</tbody></table>";
