@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <title>Geaggregeerde percelen per combinatie</title>
+    <title>Dynamische aggregatie per groepering</title>
     <style>
         html, body { height: 100%; margin: 0; padding: 0; }
         body { height: 100vh; width: 100vw; overflow: hidden; background: #fff; }
@@ -275,9 +275,10 @@ async function fetchAllPerceeltarieven(perceeltariefCountCb) {
 async function fetchAllPercelen(perceelCountCb) {
     return await fetchPaged("https://oat.hisgis.nl/oat-ws/rest/tabel?tabel=perceel", "perceel", "percelen", perceelCountCb);
 }
-function aggregateRows(
+function aggregateRowsDynamic(
     tariefsoorten, categorieen, gemeenten, provincies,
-    tarieven, perceeltarieven, percelen
+    tarieven, perceeltarieven, percelen,
+    groupbyFields
 ) {
     // Indexen
     const catMap = {};
@@ -302,7 +303,9 @@ function aggregateRows(
     percelen.forEach(perceel => {
         perceelId2grondgebruik[String(perceel[0])] = perceel[6];
     });
-    // Aggregeer per unieke combinatie
+    // Bepaal de velden waarop geaggregeerd wordt (de niet-groepeer-velden)
+    const aggFields = AGG_FIELDS.filter(f => !groupbyFields.includes(f));
+    // Aggregeer per unieke combinatie van de aggFields binnen elke groep van groupbyFields
     let agg = {};
     for (const row of tariefsoorten) {
         const id = String(row[0]);
@@ -330,15 +333,31 @@ function aggregateRows(
         for (const perceelId of perceelIds) {
             perceelGrondgebruik[perceelId] = perceelId2grondgebruik[perceelId] || "";
         }
+        // Maak een object met alle relevante velden
         if (perceelIds.length === 0) {
-            let key = [provincieNaam, gemeenteNaam, catLabel, naam, ""].join("||");
-            if (!agg[key]) agg[key] = {provincie: provincieNaam, gemeente: gemeenteNaam, categorie: catLabel, naam, grondgebruik: "", perceelSet: new Set()};
+            let obj = {
+                provincie: provincieNaam,
+                gemeente: gemeenteNaam,
+                categorie: catLabel,
+                naam: naam,
+                grondgebruik: "",
+                perceelSet: new Set()
+            };
+            let key = groupbyFields.map(f=>obj[f]||"").join("||") + "||" + aggFields.map(f=>obj[f]||"").join("||");
+            if (!agg[key]) agg[key] = {...obj, perceelSet: new Set()};
         } else {
             let perceelSet = {};
             for (const perceelId of perceelIds) {
-                let grondgebruik = perceelGrondgebruik[perceelId] || "";
-                let key = [provincieNaam, gemeenteNaam, catLabel, naam, grondgebruik].join("||");
-                if (!agg[key]) agg[key] = {provincie: provincieNaam, gemeente: gemeenteNaam, categorie: catLabel, naam, grondgebruik, perceelSet: new Set()};
+                let obj = {
+                    provincie: provincieNaam,
+                    gemeente: gemeenteNaam,
+                    categorie: catLabel,
+                    naam: naam,
+                    grondgebruik: perceelGrondgebruik[perceelId] || "",
+                    perceelSet: new Set()
+                };
+                let key = groupbyFields.map(f=>obj[f]||"").join("||") + "||" + aggFields.map(f=>obj[f]||"").join("||");
+                if (!agg[key]) agg[key] = {...obj, perceelSet: new Set()};
                 agg[key].perceelSet.add(perceelId);
             }
         }
@@ -348,20 +367,17 @@ function aggregateRows(
     for (let k in agg) {
         let a = agg[k];
         out.push({
-            provincie: a.provincie,
-            gemeente: a.gemeente,
-            categorie: a.categorie,
-            naam: a.naam,
-            grondgebruik: a.grondgebruik,
+            ...a,
             aantalPercelen: a.perceelSet.size
         });
     }
     return out;
 }
 function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
-    let rows = aggregateRows(
+    let rows = aggregateRowsDynamic(
         dataRaw.tariefsoorten, dataRaw.categorieen, dataRaw.gemeenten, dataRaw.provincies,
-        dataRaw.tarieven, dataRaw.perceeltarieven, dataRaw.percelen
+        dataRaw.tarieven, dataRaw.perceeltarieven, dataRaw.percelen,
+        groupbyFields
     );
     // Filter
     let filtered = rows.filter(row => {
@@ -427,24 +443,24 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
             } else {
                 // Render tabel, verberg gegroepeerde kolommen
                 let hiddenFields = new Set(groupbyFields);
+                let shownFields = AGG_FIELDS.filter(f=>!hiddenFields.has(f)).concat("aantalPercelen");
                 html += `<table class="airtable-table"><thead><tr>`;
-                for (let fo of FIELD_OPTIONS) {
-                    if (hiddenFields.has(fo.value)) continue;
-                    let cls = (fo.value==="aantalPercelen") ? 'right' : '';
-                    html += `<th class="${cls}">${fo.label}</th>`;
+                for (let f of shownFields) {
+                    let fo = FIELD_OPTIONS.find(x=>x.value===f);
+                    let cls = (f==="aantalPercelen") ? 'right' : '';
+                    html += `<th class="${cls}">${fo ? fo.label : f}</th>`;
                 }
                 html += `</tr></thead><tbody>`;
                 for (const row of group.rows) {
                     html += "<tr>";
-                    for (let fo of FIELD_OPTIONS) {
-                        if (hiddenFields.has(fo.value)) continue;
-                        let val = row[fo.value];
+                    for (let f of shownFields) {
+                        let val = row[f];
                         let cls = "";
-                        if (fo.value==="categorie" && (!val || val === "")) {
+                        if (f==="categorie" && (!val || val === "")) {
                             cls = "cat-empty";
                             val = "∅";
                         }
-                        if (fo.value==="aantalPercelen") cls += " right";
+                        if (f==="aantalPercelen") cls += " right";
                         html += `<td class="${cls}">${val !== undefined && val !== null ? val : ""}</td>`;
                     }
                     html += "</tr>";
@@ -461,24 +477,24 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
         html = renderGroup(groups, groupbyFields);
     } else {
         let hiddenFields = new Set();
+        let shownFields = AGG_FIELDS.filter(f=>!hiddenFields.has(f)).concat("aantalPercelen");
         html = `<table class="airtable-table"><thead><tr>`;
-        for (let fo of FIELD_OPTIONS) {
-            if (hiddenFields.has(fo.value)) continue;
-            let cls = (fo.value==="aantalPercelen") ? 'right' : '';
-            html += `<th class="${cls}">${fo.label}</th>`;
+        for (let f of shownFields) {
+            let fo = FIELD_OPTIONS.find(x=>x.value===f);
+            let cls = (f==="aantalPercelen") ? 'right' : '';
+            html += `<th class="${cls}">${fo ? fo.label : f}</th>`;
         }
         html += `</tr></thead><tbody>`;
         for (const row of filtered) {
             html += "<tr>";
-            for (let fo of FIELD_OPTIONS) {
-                if (hiddenFields.has(fo.value)) continue;
-                let val = row[fo.value];
+            for (let f of shownFields) {
+                let val = row[f];
                 let cls = "";
-                if (fo.value==="categorie" && (!val || val === "")) {
+                if (f==="categorie" && (!val || val === "")) {
                     cls = "cat-empty";
                     val = "∅";
                 }
-                if (fo.value==="aantalPercelen") cls += " right";
+                if (f==="aantalPercelen") cls += " right";
                 html += `<td class="${cls}">${val !== undefined && val !== null ? val : ""}</td>`;
             }
             html += "</tr>";
