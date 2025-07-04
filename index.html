@@ -368,7 +368,6 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
         for (let f of filterFields) {
             if (!((row[f.field]||"").toString().toLowerCase().includes((f.waarde||"").toLowerCase()))) return false;
         }
-        // Checkboxes: filter op aantalPercelen > 0 indien gewenst
         if ($("#noCatFilter").prop("checked") && row.categorie !== "") return false;
         if ($("#hasPerceeltariefFilter").prop("checked") && row.aantalPercelen === 0) return false;
         return true;
@@ -426,9 +425,11 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
             if (groupFields.length > 1) {
                 html += renderGroup(group.rows, groupFields.slice(1), depth+1);
             } else {
-                // Render volledige tabel met alle kolommen
+                // Render tabel, verberg gegroepeerde kolommen
+                let hiddenFields = new Set(groupbyFields);
                 html += `<table class="airtable-table"><thead><tr>`;
                 for (let fo of FIELD_OPTIONS) {
+                    if (hiddenFields.has(fo.value)) continue;
                     let cls = (fo.value==="aantalPercelen") ? 'right' : '';
                     html += `<th class="${cls}">${fo.label}</th>`;
                 }
@@ -436,6 +437,7 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
                 for (const row of group.rows) {
                     html += "<tr>";
                     for (let fo of FIELD_OPTIONS) {
+                        if (hiddenFields.has(fo.value)) continue;
                         let val = row[fo.value];
                         let cls = "";
                         if (fo.value==="categorie" && (!val || val === "")) {
@@ -458,8 +460,10 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
         let groups = groupRows(filtered, groupbyFields);
         html = renderGroup(groups, groupbyFields);
     } else {
+        let hiddenFields = new Set();
         html = `<table class="airtable-table"><thead><tr>`;
         for (let fo of FIELD_OPTIONS) {
+            if (hiddenFields.has(fo.value)) continue;
             let cls = (fo.value==="aantalPercelen") ? 'right' : '';
             html += `<th class="${cls}">${fo.label}</th>`;
         }
@@ -467,6 +471,7 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
         for (const row of filtered) {
             html += "<tr>";
             for (let fo of FIELD_OPTIONS) {
+                if (hiddenFields.has(fo.value)) continue;
                 let val = row[fo.value];
                 let cls = "";
                 if (fo.value==="categorie" && (!val || val === "")) {
