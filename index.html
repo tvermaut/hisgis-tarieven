@@ -2,217 +2,58 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <title>Tariefsoorten per Categorie, Gemeente, Provincie en Grondgebruik</title>
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+    <title>Dynamische Airtable-groepering</title>
     <style>
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-        }
-        body {
-            height: 100vh;
-            width: 100vw;
-            overflow: hidden;
-            background: #fff;
-        }
-        #container {
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            width: 100vw;
-            margin: 0;
-            padding: 0;
-        }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body { height: 100vh; width: 100vw; overflow: hidden; background: #fff; }
+        #container { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
         #airtablebar {
-            display: flex;
-            align-items: flex-start;
-            background: #f4f6fa;
-            border-bottom: 1px solid #e0e0e0;
-            padding: 8px 12px;
-            font-size: 13px;
-            gap: 2em;
-            flex-wrap: wrap;
+            display: flex; align-items: flex-start; background: #f4f6fa;
+            border-bottom: 1px solid #e0e0e0; padding: 8px 12px; font-size: 13px; gap: 2em; flex-wrap: wrap;
         }
-        .airtablebar-block {
-            background: #fff;
-            border: 1px solid #e0e0e0;
-            border-radius: 7px;
-            padding: 8px 14px 8px 10px;
-            margin-right: 0.5em;
-            display: flex;
-            flex-direction: column;
-            gap: 7px;
-            min-width: 170px;
-            max-width: 430px;
-            width: auto;
-            box-sizing: border-box;
-            word-break: break-word;
+        .airtablebar-block, .checkbox-block {
+            background: #fff; border: 1px solid #e0e0e0; border-radius: 7px;
+            padding: 8px 14px 8px 10px; margin-right: 0.5em;
+            display: flex; flex-direction: column; gap: 7px;
+            min-width: 170px; max-width: 430px; width: auto; box-sizing: border-box; word-break: break-word;
         }
-        .airtablebar-block label {
-            font-weight: 600;
-            margin-bottom: 2px;
+        .airtablebar-block label, .checkbox-block label { font-weight: 600; margin-bottom: 2px; }
+        .checkbox-block label { font-weight: normal; font-size: 1em; margin-bottom: 2px; }
+        .airtablebar-row { display: flex; align-items: center; gap: 0.5em; margin-bottom: 0; flex-wrap: wrap; }
+        .airtablebar-remove, .airtablebar-add {
+            background: none; border: none; font-size: 1.1em; cursor: pointer; margin-left: 0.2em; margin-right: 0.4em; line-height: 1; padding: 0;
         }
-        .airtablebar-row {
-            display: flex;
-            align-items: center;
-            gap: 0.5em;
-            margin-bottom: 0;
-            flex-wrap: wrap;
-        }
-        .airtablebar-remove {
-            background: none;
-            border: none;
-            color: #c00;
-            font-size: 1.1em;
-            cursor: pointer;
-            margin-left: 0.2em;
-            margin-right: 0.4em;
-            line-height: 1;
-            padding: 0;
-        }
-        .airtablebar-add {
-            background: none;
-            border: none;
-            color: #2d7ff9;
-            font-size: 1.1em;
-            cursor: pointer;
-            margin-left: 0.2em;
-            margin-right: 0.4em;
-            line-height: 1;
-            padding: 0;
-        }
-        .checkbox-block {
-            background: #fff;
-            border: 1px solid #e0e0e0;
-            border-radius: 7px;
-            padding: 8px 14px 8px 10px;
-            display: flex;
-            flex-direction: column;
-            gap: 7px;
-            min-width: 170px;
-            max-width: 430px;
-            width: auto;
-            box-sizing: border-box;
-        }
-        .checkbox-block label {
-            font-weight: normal;
-            font-size: 1em;
-            vertical-align: middle;
-            margin-bottom: 2px;
-        }
-        .dt-checkbox {
-            vertical-align: middle;
-            margin-right: 0.3em;
-        }
-        #table-area {
-            flex: 1 1 auto;
-            min-height: 0;
-            min-width: 0;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
-        .airtable-table-wrapper {
-            height: 100%;
-            width: 100%;
-            overflow-x: auto;
-            overflow-y: auto;
-        }
-        table.airtable-table {
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: fixed;
-        }
-        table.airtable-table thead th {
-            background: #f8fafd;
-            font-weight: 600;
-            border-bottom: 2px solid #e0e0e0;
-            padding: 5px 0;
-            text-align: left;
-        }
-        table.airtable-table th,
-        table.airtable-table td {
-            padding: 2px 6px;
-            box-sizing: border-box;
-            border-right: 1px solid #ececec;
-        }
-        table.airtable-table th:last-child,
-        table.airtable-table td:last-child {
-            border-right: none;
-        }
-        .cat-empty {
-            background-color: #ffeaea !important;
-        }
-        table.airtable-table tbody tr {
-            height: 24px;
-        }
-        table.airtable-table td, table.airtable-table th {
-            padding-top: 2px !important;
-            padding-bottom: 2px !important;
-        }
-        td.right, th.right {
-            text-align: right;
-        }
+        .airtablebar-remove { color: #c00; }
+        .airtablebar-add { color: #2d7ff9; }
+        .dt-checkbox { vertical-align: middle; margin-right: 0.3em; }
+        #table-area { flex: 1 1 auto; min-height:0; min-width:0; overflow:auto; display: flex; flex-direction: column; }
+        .airtable-table-wrapper { height: 100%; width: 100%; overflow-x: auto; overflow-y: auto; }
+        table.airtable-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        table.airtable-table th, table.airtable-table td { padding: 2px 6px; box-sizing: border-box; border-right: 1px solid #ececec; }
+        table.airtable-table th:last-child, table.airtable-table td:last-child { border-right: none; }
+        table.airtable-table thead th { background: #f8fafd; font-weight: 600; border-bottom: 2px solid #e0e0e0; padding: 5px 0; text-align: left; }
+        table.airtable-table tbody tr { height: 24px; }
+        table.airtable-table td, table.airtable-table th { padding-top: 2px !important; padding-bottom: 2px !important; }
+        td.right, th.right { text-align: right; }
+        .cat-empty { background-color: #ffeaea !important; }
         #statusbar {
-            width: 100vw;
-            min-height: 26px;
-            background: #f8f8f8;
-            color: #333;
-            font-size: 13px;
-            font-family: monospace;
-            border-top: 1px solid #ddd;
-            box-sizing: border-box;
-            padding: 3px 12px 3px 12px;
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            z-index: 100;
-            display: flex;
-            align-items: center;
+            width: 100vw; min-height: 26px; background: #f8f8f8; color: #333; font-size: 13px; font-family: monospace;
+            border-top: 1px solid #ddd; box-sizing: border-box; padding: 3px 12px 3px 12px; position: fixed; bottom: 0; left: 0; z-index: 100; display: flex; align-items: center;
         }
-        .airtable-dropdown {
-            font-size: 13px;
-            padding: 2px 6px;
-            margin-right: 0.5em;
-        }
+        .airtable-dropdown { font-size: 13px; padding: 2px 6px; margin-right: 0.5em; }
         .group-box {
-            border-radius: 7px;
-            border: 1.5px solid #e0e0e0;
-            margin: 12px 0 12px 0;
-            padding: 0 0 0 0;
-            background: #fafbfc;
+            border-radius: 7px; border: 1.5px solid #e0e0e0; margin: 12px 0 12px 0; padding: 0 0 0 0; background: #fafbfc;
         }
         .group-header {
-            background: #f0f1f5;
-            font-size: 1.08em;
-            font-weight: 600;
-            color: #2d2d2d;
-            padding: 7px 16px;
-            border-bottom: 1px solid #e0e0e0;
-            border-radius: 7px 7px 0 0;
-            margin-bottom: 0;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
+            background: #f0f1f5; font-size: 1.08em; font-weight: 600; color: #2d2d2d;
+            padding: 7px 16px; border-bottom: 1px solid #e0e0e0; border-radius: 7px 7px 0 0; margin-bottom: 0;
+            display: flex; align-items: center; justify-content: space-between; cursor: pointer;
         }
         .group-header .toggle {
-            margin-left: 1em;
-            font-size: 1.2em;
-            color: #888;
-            cursor: pointer;
-            user-select: none;
+            margin-left: 1em; font-size: 1.2em; color: #888; cursor: pointer; user-select: none;
         }
-        .group-content {
-            padding: 10px 18px 10px 18px;
-        }
-        .group-box .group-box {
-            margin-left: 22px;
-            margin-right: 8px;
-            margin-top: 8px;
-            margin-bottom: 8px;
-        }
+        .group-content { padding: 10px 18px 10px 18px; }
+        .group-box .group-box { margin-left: 22px; margin-right: 8px; margin-top: 8px; margin-bottom: 8px; }
     </style>
 </head>
 <body>
@@ -538,12 +379,12 @@ function aggregateDataDynamic(
     let out = [];
     for (let k in agg) {
         let a = agg[k];
-        out.push([
-            ...a.groupVals,
-            a.perceelSet.size,
-            a.hasNoCat,
-            a.hasPerceeltarief
-        ]);
+        out.push({
+            groupVals: a.groupVals,
+            aantalPercelen: a.perceelSet.size,
+            hasNoCat: a.hasNoCat,
+            hasPerceeltarief: a.hasPerceeltarief
+        });
     }
     return out;
 }
@@ -553,14 +394,15 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
         dataRaw.tarieven, dataRaw.perceeltarieven, dataRaw.percelen,
         groupbyFields
     );
+    // Filter en sorteren
     let filtered = data.filter(row => {
         for (let f of filterFields) {
             let idx = groupbyFields.indexOf(f.field);
-            if (idx === -1) continue; // niet in kolommen
-            if (!((row[idx]||"").toString().toLowerCase().includes((f.waarde||"").toLowerCase()))) return false;
+            if (idx === -1) continue;
+            if (!((row.groupVals[idx]||"").toString().toLowerCase().includes((f.waarde||"").toLowerCase()))) return false;
         }
-        if ($("#noCatFilter").prop("checked") && !row[groupbyFields.length+1]) return false;
-        if ($("#hasPerceeltariefFilter").prop("checked") && !row[groupbyFields.length+2]) return false;
+        if ($("#noCatFilter").prop("checked") && !row.hasNoCat) return false;
+        if ($("#hasPerceeltariefFilter").prop("checked") && !row.hasPerceeltarief) return false;
         return true;
     });
     if (sortbyFields.length) {
@@ -568,13 +410,75 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
             for (let s of sortbyFields) {
                 let idx = groupbyFields.indexOf(s.field);
                 if (idx === -1) continue;
-                let va = a[idx] || "";
-                let vb = b[idx] || "";
+                let va = a.groupVals[idx] || "";
+                let vb = b.groupVals[idx] || "";
                 let cmp = va.localeCompare(vb, undefined, {numeric:true});
                 if (cmp !== 0) return s.dir === "asc" ? cmp : -cmp;
             }
             return 0;
         });
+    }
+    // Recursief groeperen
+    function groupRows(rows, groupFields, depth=0) {
+        if (!groupFields.length) return rows;
+        let idx = 0;
+        let groups = [];
+        let lastVal = null, curGroup = null;
+        rows.forEach(row => {
+            let val = row.groupVals[idx] || "";
+            if (curGroup && curGroup.value === val) {
+                curGroup.rows.push({
+                    groupVals: row.groupVals.slice(1),
+                    aantalPercelen: row.aantalPercelen,
+                    hasNoCat: row.hasNoCat,
+                    hasPerceeltarief: row.hasPerceeltarief
+                });
+            } else {
+                curGroup = {
+                    value: val,
+                    rows: [{
+                        groupVals: row.groupVals.slice(1),
+                        aantalPercelen: row.aantalPercelen,
+                        hasNoCat: row.hasNoCat,
+                        hasPerceeltarief: row.hasPerceeltarief
+                    }],
+                    collapsed: false,
+                    id: Math.random().toString(36).substr(2,8)
+                };
+                groups.push(curGroup);
+            }
+        });
+        if (groupFields.length > 1) {
+            groups.forEach(g => g.rows = groupRows(g.rows, groupFields.slice(1), depth+1));
+        }
+        return groups;
+    }
+    function renderGroup(groups, groupFields, depth=0) {
+        let html = "";
+        let field = groupFields[0];
+        let label = FIELD_OPTIONS.find(f=>f.value===field)?.label || field;
+        for (const group of groups) {
+            let groupId = group.id;
+            let collapsed = group.collapsed;
+            html += `<div class="group-box" data-groupid="${groupId}" style="margin-left:${depth*24}px">`;
+            html += `<div class="group-header" data-groupid="${groupId}">
+                <span>${label}: ${group.value || "(leeg)"}</span>
+                <span class="toggle" data-groupid="${groupId}" title="Groep ${collapsed?'openen':'sluiten'}">${collapsed?'&#9654;':'&#9660;'}</span>
+            </div>`;
+            html += `<div class="group-content" style="display:${collapsed?'none':'block'}">`;
+            if (groupFields.length > 1) {
+                html += renderGroup(group.rows, groupFields.slice(1), depth+1);
+            } else {
+                // Render tabel met alleen "Aantal percelen"
+                html += `<table class="airtable-table"><thead><tr><th class="right">Aantal percelen</th></tr></thead><tbody>`;
+                for (const row of group.rows) {
+                    html += `<tr><td class="right">${row.aantalPercelen}</td></tr>`;
+                }
+                html += `</tbody></table>`;
+            }
+            html += `</div></div>`;
+        }
+        return html;
     }
     // Kolomkoppen
     let headers = groupbyFields.map(f => {
@@ -582,30 +486,51 @@ function renderAirtableTable(dataRaw, perceelCount, perceeltariefCount) {
         return fo ? fo.label : f;
     });
     headers.push('Aantal percelen');
-    let html = `<table class="airtable-table"><thead><tr>`;
-    for (let i=0; i<headers.length; ++i) {
-        let cls = (i===headers.length-1) ? 'right' : '';
-        html += `<th class="${cls}">${headers[i]}</th>`;
-    }
-    html += `</tr></thead><tbody>`;
-    for (const row of filtered) {
-        html += "<tr>";
-        for (let i=0; i<groupbyFields.length; ++i) {
-            let val = row[i];
-            let field = groupbyFields[i];
-            let cls = "";
-            if (field==="categorie" && (!val || val === "")) {
-                cls = "cat-empty";
-                val = "∅";
-            }
-            html += `<td class="${cls}">${val !== undefined && val !== null ? val : ""}</td>`;
+    let html = "";
+    if (groupbyFields.length) {
+        let groups = groupRows(filtered, groupbyFields);
+        html = renderGroup(groups, groupbyFields);
+    } else {
+        html = `<table class="airtable-table"><thead><tr>`;
+        for (let i=0; i<headers.length; ++i) {
+            let cls = (i===headers.length-1) ? 'right' : '';
+            html += `<th class="${cls}">${headers[i]}</th>`;
         }
-        html += `<td class="right">${row[groupbyFields.length]}</td>`;
-        html += "</tr>";
+        html += `</tr></thead><tbody>`;
+        for (const row of filtered) {
+            html += "<tr>";
+            for (let i=0; i<groupbyFields.length; ++i) {
+                let val = row.groupVals[i];
+                let field = groupbyFields[i];
+                let cls = "";
+                if (field==="categorie" && (!val || val === "")) {
+                    cls = "cat-empty";
+                    val = "∅";
+                }
+                html += `<td class="${cls}">${val !== undefined && val !== null ? val : ""}</td>`;
+            }
+            html += `<td class="right">${row.aantalPercelen}</td>`;
+            html += "</tr>";
+        }
+        html += "</tbody></table>";
     }
-    html += "</tbody></table>";
     $('#airtable-table-root').html(html);
     setStatus(`Gereed! Percelen: ${perceelCount}, perceeltarieven: ${perceeltariefCount}`);
+    // Toggle-groepen
+    $('.group-header .toggle').off().on('click', function(e) {
+        let groupId = $(this).data('groupid');
+        let $box = $(`.group-box[data-groupid="${groupId}"]`);
+        let $content = $box.find('>.group-content');
+        let $icon = $box.find('.group-header .toggle');
+        if ($content.is(':visible')) {
+            $content.slideUp(120);
+            $icon.html('&#9654;').attr('title','Groep openen');
+        } else {
+            $content.slideDown(120);
+            $icon.html('&#9660;').attr('title','Groep sluiten');
+        }
+        e.stopPropagation();
+    });
 }
 function attachBarEvents(dataRaw, perceelCount, perceeltariefCount) {
     $('#groupby-add').off().on('click', function() {
